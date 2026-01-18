@@ -1,0 +1,1395 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="row">
+    <!-- Status & Controls -->
+    <div class="col-md-4 mb-4">
+        <div class="card bg-dark border-secondary h-100">
+            <div class="card-header bg-secondary bg-opacity-25 text-white">
+                <i class="bi bi-robot me-2"></i> LoopBot Status
+            </div>
+            <div class="card-body">
+                <div class="mb-3 text-center">
+                    <img id="channelThumbnail"
+                        src="{{ channel_thumbnail or 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png' }}"
+                        alt="Profile" class="rounded-circle mb-2"
+                        style="width: 80px; height: 80px; object-fit: cover; border: 2px solid #0066cc;">
+                    <h5 id="channelName" class="mb-0 fw-bold">{{ channel_name }}</h5>
+                    <small class="text-secondary"><i class="bi bi-people-fill me-1"></i> <span
+                            id="channelSubscribers">{{ channel_subscribers }}</span> Subscribers</small>
+                </div>
+                <div class="mb-3">
+                    <strong>Status:</strong>
+                    <span id="botStatus" class="badge {% if is_running %}bg-success{% else %}bg-secondary{% endif %}">
+                        {% if is_running %}RUNNING{% else %}STOPPED{% endif %}
+                    </span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-warning small mb-1"><i class="bi bi-arrow-repeat me-1"></i> Switch
+                        Active Channel</label>
+                    <select id="quickChannelSelect"
+                        class="form-select form-select-sm bg-dark border-secondary text-light"
+                        onchange="quickSwitchChannel(this.value)">
+                        <option value="" disabled selected>Select Channel...</option>
+                        <!-- Populated via JS -->
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <strong>Authenticated:</strong>
+                    {% if logged_in %}
+                    <span class="text-success"><i class="bi bi-check-circle-fill"></i> Yes</span>
+                    {% else %}
+                    <span class="text-danger"><i class="bi bi-x-circle-fill"></i> No</span>
+                    <a href="/loopbot/auth" class="btn btn-sm btn-outline-primary ms-2">Login with Google</a>
+                    {% endif %}
+                </div>
+
+                <hr class="border-secondary">
+
+                <div class="d-grid gap-2">
+                    <button id="btnStart" class="btn btn-success" {% if is_running %}disabled{% endif %}
+                        onclick="startLoop()">
+                        <i class="bi bi-play-fill"></i> Start Loop
+                    </button>
+                    <button id="btnStop" class="btn btn-danger" {% if not is_running %}disabled{% endif %}
+                        onclick="stopLoop()">
+                        <i class="bi bi-stop-fill"></i> Stop Loop
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="col-md-8 mb-4">
+        <div class="card bg-dark border-secondary h-100">
+            <div class="card-header bg-secondary bg-opacity-25 text-white">
+                <i class="bi bi-sliders me-2"></i> Settings
+            </div>
+            <div class="card-body">
+                <form id="settingsForm">
+                    <div class="row g-3">
+                        <!-- Duration -->
+                        <div class="col-md-6">
+                            <label class="form-label text-white">Duration (HH:MM:SS)</label>
+                            <div class="d-flex gap-1 align-items-center">
+                                <input type="number"
+                                    class="form-control bg-dark border-secondary text-light text-center"
+                                    id="durationHours" value="00" min="0" max="23" style="width: 60px;">
+                                <span class="text-light">:</span>
+                                <input type="number"
+                                    class="form-control bg-dark border-secondary text-light text-center"
+                                    id="durationMinutes" value="05" min="0" max="59" style="width: 60px;">
+                                <span class="text-light">:</span>
+                                <input type="number"
+                                    class="form-control bg-dark border-secondary text-light text-center"
+                                    id="durationSeconds" value="00" min="0" max="59" style="width: 60px;">
+                            </div>
+                        </div>
+                        <!-- Delay -->
+                        <div class="col-md-6">
+                            <label class="form-label text-white">Delay (minutes)</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light"
+                                id="delayMinutes" value="1" min="0">
+                        </div>
+                        <!-- Max Streams -->
+                        <div class="col-md-6">
+                            <label class="form-label text-white">Max Streams</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light"
+                                id="maxStreams" value="1" min="1">
+                        </div>
+                        <!-- Max Duplicates -->
+                        <div class="col-md-6">
+                            <label class="form-label text-white">Max Duplicates</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light"
+                                id="maxDuplicates" value="1" min="1">
+                        </div>
+                        <!-- Min Vod Views (Auto-Private) -->
+                        <div class="col-md-6">
+                            <label class="form-label text-white"
+                                title="Stream becomes Private if views < this value upon completion">
+                                Min Vod Views (Auto-Private)
+                                <i class="bi bi-info-circle ms-1 small text-secondary"></i>
+                            </label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light"
+                                id="minVodViews" value="500" min="0" placeholder="0 to disable">
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="filterLowViewers">
+                                <label class="form-check-label text-white">Filter Low Viewers</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoRotateTitle" checked>
+                                <label class="form-check-label text-white">Auto-Rotate Titles</label>
+                            </div>
+                        </div>
+                        <!-- Checkboxes Row 2 -->
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="randomizeContent" checked>
+                                <label class="form-check-label text-white">Randomize Content</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="avoidDuplicates" checked>
+                                <label class="form-check-label text-white">Avoid Duplicates</label>
+                            </div>
+                        </div>
+                        <!-- Action Buttons -->
+                        <div class="col-12">
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button type="button" class="btn btn-outline-success btn-sm"
+                                    onclick="openContentModal()">
+                                    <i class="bi bi-collection me-1"></i> Manage Content
+                                </button>
+                                <button type="button" class="btn btn-outline-warning btn-sm"
+                                    onclick="resetUsedContent()">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i> Reset Used Content
+                                </button>
+                                <button type="button" class="btn btn-outline-info btn-sm" onclick="checkStreamKeys()">
+                                    <i class="bi bi-key me-1"></i> Check Stream Keys
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+                <div class="mt-3 text-end">
+                    <button class="btn btn-primary btn-sm" onclick="saveSettings()">
+                        <i class="bi bi-save me-1"></i> Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Running Streams Monitor -->
+    <div class="col-12 mb-4">
+        <div class="card bg-dark border-secondary">
+            <div
+                class="card-header bg-secondary bg-opacity-25 d-flex justify-content-between align-items-center text-white">
+                <span><i class="bi bi-broadcast me-2"></i> Running Streams <span id="runningStreamsCount"
+                        class="badge bg-success ms-2">0</span></span>
+                <button class="btn btn-sm btn-outline-danger" onclick="stopAllStreams()" id="btnStopAll" disabled>
+                    <i class="bi bi-stop-circle me-1"></i> Stop All
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 120px;">Stream ID</th>
+                                <th style="width: 120px;">Stream Key</th>
+                                <th>Title</th>
+                                <th style="width: 150px;">Progress</th>
+                                <th style="width: 100px;">Status</th>
+                                <th style="width: 80px;">Viewers</th>
+                                <th style="width: 80px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="runningStreamsBody">
+                            <tr id="noStreamsRow">
+                                <td colspan="7" class="text-center text-secondary py-4">
+                                    <i class="bi bi-broadcast fs-3 d-block mb-2"></i>
+                                    No active streams. Click "Start Loop" to begin.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="col-12">
+        <div class="card bg-dark border-secondary">
+            <div
+                class="card-header bg-secondary bg-opacity-25 d-flex justify-content-between align-items-center text-white">
+                <span><i class="bi bi-terminal me-2"></i> Logs</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="clearLogs()">Clear</button>
+            </div>
+            <div class="card-body p-0">
+                <div id="logContainer" class="p-3"
+                    style="height: 250px; overflow-y: auto; font-family: monospace; font-size: 0.9em; background-color: #000;">
+                    {% for log in logs %}
+                    <div class="text-light border-bottom border-dark py-1">{{ log }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Content Management Modal -->
+<div class="modal fade" id="contentModal" tabindex="-1" aria-labelledby="contentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="contentModalLabel">
+                    <i class="bi bi-collection me-2"></i> Content Management
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Content List -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="text-secondary">Total: <span id="contentCount">0</span> items</span>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                            onclick="document.getElementById('jsonFileInput').click()">
+                            <i class="bi bi-upload me-1"></i> Import JSON
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="exportContentJson()">
+                            <i class="bi bi-download me-1"></i> Export
+                        </button>
+                        <button type="button" class="btn btn-success btn-sm" onclick="openAddContentForm()">
+                            <i class="bi bi-plus-lg me-1"></i> Add Content
+                        </button>
+                    </div>
+                    <input type="file" id="jsonFileInput" accept=".json" style="display: none;"
+                        onchange="importJsonFile(event)">
+                </div>
+
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-dark table-striped table-hover">
+                        <thead class="sticky-top bg-dark">
+                            <tr>
+                                <th style="width: 40px;">#</th>
+                                <th>Title</th>
+                                <th style="width: 150px;">Stream Key</th>
+                                <th style="width: 100px;">Status</th>
+                                <th style="width: 120px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contentTableBody">
+                            <!-- Content rows will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-outline-primary" onclick="openThumbnailGallery()">
+                    <i class="bi bi-images me-1"></i> Manage Thumbnails
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Thumbnail Gallery Modal -->
+<div class="modal fade" id="thumbnailModal" tabindex="-1" aria-labelledby="thumbnailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="thumbnailModalLabel">
+                    <i class="bi bi-images me-2"></i> Thumbnail Gallery
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Upload Section -->
+                <div class="mb-4 p-3 border border-secondary border-dashed rounded" id="uploadDropZone">
+                    <div class="text-center">
+                        <i class="bi bi-cloud-upload fs-1 text-secondary"></i>
+                        <p class="text-secondary mb-2">Drag & drop images here or click to upload</p>
+                        <input type="file" id="thumbnailFileInput" accept="image/*" multiple style="display: none;"
+                            onchange="uploadThumbnails(event)">
+                        <button type="button" class="btn btn-primary btn-sm"
+                            onclick="document.getElementById('thumbnailFileInput').click()">
+                            <i class="bi bi-upload me-1"></i> Select Images
+                        </button>
+                        <small class="d-block text-secondary mt-2">Supported: PNG, JPG, JPEG, GIF, WEBP</small>
+                    </div>
+                </div>
+
+                <!-- Gallery Grid -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="text-secondary">Total: <span id="thumbnailCount">0</span> thumbnails</span>
+                    <div id="thumbnailSelectMode" class="d-none">
+                        <span class="badge bg-info me-2">Select Mode</span>
+                        <span class="text-secondary">Click a thumbnail to select</span>
+                    </div>
+                </div>
+
+                <div class="row g-3" id="thumbnailGallery">
+                    <!-- Thumbnails will be inserted here -->
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Content Modal -->
+<div class="modal fade" id="contentFormModal" tabindex="-1" aria-labelledby="contentFormModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="contentFormModalLabel">
+                    <i class="bi bi-plus-circle me-2"></i> <span id="formTitle">Add Content</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="contentForm">
+                    <input type="hidden" id="contentId" value="">
+                    <input type="hidden" id="formMode" value="add">
+
+                    <!-- Multi Title (for Add mode) -->
+                    <div class="mb-3" id="multiTitleGroup">
+                        <label for="contentTitles" class="form-label">
+                            Multi Title <span class="text-danger">*</span>
+                            <small class="text-secondary ms-2">(one per line)</small>
+                        </label>
+                        <textarea class="form-control bg-dark border-secondary text-light" id="contentTitles" rows="4"
+                            placeholder="JUDUL 1&#10;JUDUL 2&#10;JUDUL 3&#10;JUDUL 4"></textarea>
+                    </div>
+
+                    <!-- Single Title (for Edit mode) -->
+                    <div class="mb-3 d-none" id="singleTitleGroup">
+                        <label for="contentTitle" class="form-label">Title <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="contentTitle"
+                            placeholder="Enter stream title">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="contentDesc" class="form-label">Description</label>
+                        <textarea class="form-control bg-dark border-secondary text-light" id="contentDesc" rows="4"
+                            placeholder="Enter description (supports spin syntax like {word1|word2})"></textarea>
+                        <small class="text-secondary">Supports spin syntax: {option1|option2|option3}</small>
+                    </div>
+
+                    <div class="row">
+                        <!-- Multi Stream Key (for Add mode) -->
+                        <div class="col-md-6 mb-3" id="multiKeyGroup">
+                            <label for="contentKeystreams" class="form-label">
+                                Multi Stream Key <span class="text-danger">*</span>
+                                <small class="text-secondary ms-2">(one per line)</small>
+                            </label>
+                            <textarea class="form-control bg-dark border-secondary text-light" id="contentKeystreams"
+                                rows="4" placeholder="key1-xxxx-xxxx&#10;key2-xxxx-xxxx&#10;key3-xxxx-xxxx"></textarea>
+                        </div>
+
+                        <!-- Single Stream Key (for Edit mode) -->
+                        <div class="col-md-6 mb-3 d-none" id="singleKeyGroup">
+                            <label for="contentKeystream" class="form-label">Stream Key <span
+                                    class="text-danger">*</span></label>
+                            <input type="text" class="form-control bg-dark border-secondary text-light"
+                                id="contentKeystream" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx">
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label for="contentThumbnail" class="form-label">Thumbnail</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control bg-dark border-secondary text-light"
+                                    id="contentThumbnail" placeholder="Click to select thumbnail" readonly>
+                                <button class="btn btn-outline-info" type="button" onclick="openThumbnailPicker()">
+                                    <i class="bi bi-images"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary" type="button" onclick="clearThumbnail()">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            </div>
+                            <div id="thumbnailPreviewContainer" class="mt-2 d-none">
+                                <img id="thumbnailPreview" src="" alt="Thumbnail preview"
+                                    style="max-width: 120px; max-height: 80px; border-radius: 4px; border: 1px solid #444;">
+                            </div>
+                            <small class="text-secondary">Applied to all items</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="contentTags" class="form-label">Tags</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="contentTags"
+                            placeholder="Tag1, Tag2, Tag3">
+                        <small class="text-secondary">Separate tags with commas - applied to all items</small>
+                    </div>
+
+                    <!-- Preview for Add mode -->
+                    <div class="mb-3" id="previewSection">
+                        <label class="form-label">Preview</label>
+                        <div class="bg-secondary bg-opacity-25 rounded p-2"
+                            style="max-height: 150px; overflow-y: auto;">
+                            <small id="previewText" class="text-secondary">
+                                Enter titles and stream keys to see preview...
+                            </small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveContent()">
+                    <i class="bi bi-save me-1"></i> <span id="saveButtonText">Save Content</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Content data storage
+    let contentItems = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadQuickChannels();
+    });
+
+    function loadQuickChannels() {
+        fetch('/loopbot/channels/list')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.channels.length > 0) {
+                    const select = document.getElementById('quickChannelSelect');
+                    // Find active channel to select it
+                    const activeChannel = data.channels.find(c => c.active);
+
+                    select.innerHTML = data.channels.map(c =>
+                        `<option value="${c.id}" ${c.active ? 'selected' : ''}>${c.title}</option>`
+                    ).join('');
+
+                    if (!activeChannel) {
+                        select.innerHTML = '<option value="" disabled selected>Select Channel...</option>' + select.innerHTML;
+                    }
+                } else {
+                    document.getElementById('quickChannelSelect').disabled = true;
+                    document.getElementById('quickChannelSelect').innerHTML = '<option>No channels added</option>';
+                }
+            });
+    }
+
+    function quickSwitchChannel(id) {
+        if (!id) return;
+        if (!confirm('Switch channel? Automation might need restart.')) {
+            loadQuickChannels(); // reset selection
+            return;
+        }
+
+        fetch(`/loopbot/channels/switch/${id}`, { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    location.reload();
+                } else {
+                    alert('Failed to switch: ' + d.message);
+                }
+            });
+    }
+
+    function openContentModal() {
+        loadContentList();
+        const modal = new bootstrap.Modal(document.getElementById('contentModal'));
+        modal.show();
+    }
+
+    function loadContentList() {
+        fetch('/loopbot/content')
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    contentItems = d.content || [];
+                    renderContentTable();
+                }
+            })
+            .catch(() => {
+                contentItems = [];
+                renderContentTable();
+            });
+    }
+
+    function renderContentTable() {
+        const tbody = document.getElementById('contentTableBody');
+        document.getElementById('contentCount').textContent = contentItems.length;
+
+        if (contentItems.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center text-secondary py-4">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                        No content added yet. Click "Add Content" to get started.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = contentItems.map((item, index) => `
+            <tr>
+                <td>${index + 1}</td>
+                <td>
+                    <div class="text-truncate" style="max-width: 300px;" title="${escapeHtml(item.title)}">
+                        ${escapeHtml(item.title)}
+                    </div>
+                </td>
+                <td><code class="text-info">${escapeHtml(item.keystream?.substring(0, 15) || '')}...</code></td>
+                <td>
+                    ${item.used
+                ? '<span class="badge bg-secondary">Used</span>'
+                : '<span class="badge bg-success">Available</span>'}
+                </td>
+                <td>
+                    <button class="btn btn-outline-primary btn-sm me-1" onclick="editContent(${index})" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteContent(${index})" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function setFormMode(mode) {
+        const isAdd = mode === 'add';
+        document.getElementById('formMode').value = mode;
+
+        // Toggle visibility
+        document.getElementById('multiTitleGroup').classList.toggle('d-none', !isAdd);
+        document.getElementById('singleTitleGroup').classList.toggle('d-none', isAdd);
+        document.getElementById('multiKeyGroup').classList.toggle('d-none', !isAdd);
+        document.getElementById('singleKeyGroup').classList.toggle('d-none', isAdd);
+        document.getElementById('previewSection').classList.toggle('d-none', !isAdd);
+
+        // Update button text
+        document.getElementById('saveButtonText').textContent = isAdd ? 'Add All Content' : 'Save Content';
+    }
+
+    function updatePreview() {
+        const titles = document.getElementById('contentTitles').value.split('\n').filter(t => t.trim());
+        const keys = document.getElementById('contentKeystreams').value.split('\n').filter(k => k.trim());
+        const previewEl = document.getElementById('previewText');
+
+        if (titles.length === 0 && keys.length === 0) {
+            previewEl.innerHTML = 'Enter titles and stream keys to see preview...';
+            return;
+        }
+
+        const count = Math.max(titles.length, keys.length);
+        let html = `<div class="text-success mb-1">Will create ${count} content item(s):</div>`;
+
+        for (let i = 0; i < count; i++) {
+            const title = titles[i] || titles[titles.length - 1] || 'No title';
+            const key = keys[i] || keys[keys.length - 1] || 'No key';
+            html += `<div class="border-bottom border-secondary py-1">
+                <span class="text-info">#${i + 1}</span>
+                <span class="text-light">${escapeHtml(title.substring(0, 40))}${title.length > 40 ? '...' : ''}</span>
+                <code class="text-warning ms-2">${escapeHtml(key.substring(0, 15))}...</code>
+            </div>`;
+        }
+
+        previewEl.innerHTML = html;
+    }
+
+    function openAddContentForm() {
+        document.getElementById('formTitle').textContent = 'Add Content';
+        document.getElementById('contentId').value = '';
+        document.getElementById('contentForm').reset();
+        setFormMode('add');
+
+        // Clear thumbnail preview
+        document.getElementById('thumbnailPreview').src = '';
+        document.getElementById('thumbnailPreviewContainer').classList.add('d-none');
+
+        // Add preview listeners
+        document.getElementById('contentTitles').oninput = updatePreview;
+        document.getElementById('contentKeystreams').oninput = updatePreview;
+        updatePreview();
+
+        // Hide content modal, show form modal
+        bootstrap.Modal.getInstance(document.getElementById('contentModal'))?.hide();
+        setTimeout(() => {
+            const formModal = new bootstrap.Modal(document.getElementById('contentFormModal'));
+            formModal.show();
+        }, 300);
+    }
+
+    function editContent(index) {
+        const item = contentItems[index];
+        if (!item) return;
+
+        document.getElementById('formTitle').textContent = 'Edit Content';
+        document.getElementById('contentId').value = index;
+        setFormMode('edit');
+
+        document.getElementById('contentTitle').value = item.title || '';
+        document.getElementById('contentDesc').value = item.desc || '';
+        document.getElementById('contentKeystream').value = item.keystream || '';
+        document.getElementById('contentThumbnail').value = item.thumbnail || '';
+        document.getElementById('contentTags').value = item.tags || '';
+
+        // Show thumbnail preview if exists
+        if (item.thumbnail) {
+            document.getElementById('thumbnailPreview').src = item.thumbnail;
+            document.getElementById('thumbnailPreviewContainer').classList.remove('d-none');
+        } else {
+            document.getElementById('thumbnailPreview').src = '';
+            document.getElementById('thumbnailPreviewContainer').classList.add('d-none');
+        }
+
+        // Hide content modal, show form modal
+        bootstrap.Modal.getInstance(document.getElementById('contentModal'))?.hide();
+        setTimeout(() => {
+            const formModal = new bootstrap.Modal(document.getElementById('contentFormModal'));
+            formModal.show();
+        }, 300);
+    }
+
+    function saveContent() {
+        const mode = document.getElementById('formMode').value;
+        const id = document.getElementById('contentId').value;
+
+        if (mode === 'add') {
+            // Multi-add mode
+            const titles = document.getElementById('contentTitles').value.split('\n').filter(t => t.trim());
+            const keys = document.getElementById('contentKeystreams').value.split('\n').filter(k => k.trim());
+
+            if (titles.length === 0 || keys.length === 0) {
+                alert('Please enter at least one title and one stream key!');
+                return;
+            }
+
+            const desc = document.getElementById('contentDesc').value.trim();
+            const thumbnail = document.getElementById('contentThumbnail').value.trim();
+            const tags = document.getElementById('contentTags').value.trim();
+
+            // Create content items by pairing titles and keys
+            const count = Math.max(titles.length, keys.length);
+            const items = [];
+
+            for (let i = 0; i < count; i++) {
+                items.push({
+                    title: (titles[i] || titles[titles.length - 1]).trim(),
+                    desc: desc,
+                    keystream: (keys[i] || keys[keys.length - 1]).trim(),
+                    thumbnail: thumbnail,
+                    tags: tags
+                });
+            }
+
+            // Send bulk add request
+            fetch('/loopbot/content/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: items })
+            })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('contentFormModal'))?.hide();
+                        setTimeout(() => {
+                            openContentModal();
+                        }, 300);
+                        alert(`Successfully added ${d.count} content items!`);
+                    } else {
+                        alert(d.message || 'Failed to add content');
+                    }
+                })
+                .catch(err => {
+                    alert('Error adding content: ' + err.message);
+                });
+
+        } else {
+            // Single edit mode
+            const title = document.getElementById('contentTitle').value.trim();
+            const keystream = document.getElementById('contentKeystream').value.trim();
+
+            if (!title || !keystream) {
+                alert('Title and Stream Key are required!');
+                return;
+            }
+
+            const contentData = {
+                title: title,
+                desc: document.getElementById('contentDesc').value.trim(),
+                keystream: keystream,
+                thumbnail: document.getElementById('contentThumbnail').value.trim(),
+                tags: document.getElementById('contentTags').value.trim()
+            };
+
+            fetch(`/loopbot/content/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(contentData)
+            })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('contentFormModal'))?.hide();
+                        setTimeout(() => {
+                            openContentModal();
+                        }, 300);
+                    } else {
+                        alert(d.message || 'Failed to save content');
+                    }
+                })
+                .catch(err => {
+                    alert('Error saving content: ' + err.message);
+                });
+        }
+    }
+
+    function deleteContent(index) {
+        if (!confirm('Are you sure you want to delete this content?')) return;
+
+        fetch(`/loopbot/content/${index}`, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    loadContentList();
+                } else {
+                    alert(d.message || 'Failed to delete content');
+                }
+            });
+    }
+
+    function importJsonFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+                const jsonData = JSON.parse(e.target.result);
+
+                // Validate JSON structure
+                if (!Array.isArray(jsonData)) {
+                    alert('Invalid JSON format. Expected an array of content items.');
+                    return;
+                }
+
+                // Validate items have required fields
+                const validItems = jsonData.filter(item =>
+                    item.title && item.keystream
+                );
+
+                if (validItems.length === 0) {
+                    alert('No valid items found. Each item must have "title" and "keystream" fields.');
+                    return;
+                }
+
+                // Ask user whether to replace or append
+                const action = confirm(
+                    `Found ${validItems.length} valid items.\n\n` +
+                    `OK = Replace all existing content\n` +
+                    `Cancel = Append to existing content`
+                );
+
+                const endpoint = action ? '/loopbot/content/import?mode=replace' : '/loopbot/content/import?mode=append';
+
+                fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: validItems })
+                })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.success) {
+                            alert(`Successfully imported ${d.count} content items!`);
+                            loadContentList();
+                        } else {
+                            alert(d.message || 'Failed to import content');
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error importing content: ' + err.message);
+                    });
+
+            } catch (err) {
+                alert('Failed to parse JSON file: ' + err.message);
+            }
+        };
+
+        reader.readAsText(file);
+        // Reset input so same file can be selected again
+        event.target.value = '';
+    }
+
+    function exportContentJson() {
+        if (contentItems.length === 0) {
+            alert('No content to export.');
+            return;
+        }
+
+        // Create clean export data (without 'used' status)
+        const exportData = contentItems.map(item => ({
+            title: item.title,
+            desc: item.desc || '',
+            keystream: item.keystream,
+            thumbnail: item.thumbnail || '',
+            tags: item.tags || ''
+        }));
+
+        const jsonString = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'loopbot_content_' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function startLoop() {
+        if (!confirm("Start automation loop?")) return;
+        fetch('/loopbot/start', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) updateStatus();
+                else alert(d.message);
+            });
+    }
+
+    function stopLoop() {
+        if (!confirm("Stop automation loop?")) return;
+        fetch('/loopbot/stop', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) updateStatus();
+                else alert(d.message);
+            });
+    }
+
+    function resetUsedContent() {
+        if (!confirm("Reset all content 'Used' status to Available?")) return;
+        fetch('/loopbot/reset-used-content', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    alert('Content status reset successfully!');
+                    // Refresh if modal is open
+                    if (document.getElementById('contentModal').classList.contains('show')) {
+                        loadContentList();
+                    }
+                } else {
+                    alert(d.message || 'Failed to reset content');
+                }
+            });
+    }
+
+    function checkStreamKeys() {
+        fetch('/loopbot/check-stream-keys', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    alert(`Stream Key Check:\n\nValid Format: ${d.valid}\nInvalid/Empty: ${d.invalid}\nTotal: ${d.total}`);
+                } else {
+                    alert(d.message || 'Check failed');
+                }
+            });
+    }
+
+    function saveSettings() {
+        const data = {
+            duration_hours: document.getElementById('durationHours').value,
+            duration_minutes: document.getElementById('durationMinutes').value,
+            duration_seconds: document.getElementById('durationSeconds').value,
+            delay_minutes: document.getElementById('delayMinutes').value,
+            max_streams: document.getElementById('maxStreams').value,
+            max_duplicates: document.getElementById('maxDuplicates').value,
+            filter_low_viewers: document.getElementById('filterLowViewers').checked,
+            auto_rotate_title: document.getElementById('autoRotateTitle').checked,
+            randomize_content: document.getElementById('randomizeContent').checked,
+            avoid_duplicates: document.getElementById('avoidDuplicates').checked
+        };
+
+        fetch('/loopbot/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(r => r.json()).then(d => {
+            if (d.success) alert("Settings saved!");
+            else alert(d.message || "Failed to save settings");
+        });
+    }
+
+    function resetUsedContent() {
+        if (!confirm("Reset all used content tracking? This will allow all content to be used again.")) return;
+        fetch('/loopbot/reset-used-content', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) alert("Used content has been reset!");
+                else alert(d.message || "Failed to reset");
+            });
+    }
+
+    function checkStreamKeys() {
+        fetch('/loopbot/check-stream-keys', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    alert(`Stream Keys Status:\nValid: ${d.valid}\nInvalid: ${d.invalid}\nTotal: ${d.total}`);
+                } else {
+                    alert(d.message || "Failed to check stream keys");
+                }
+            });
+    }
+
+    function clearLogs() {
+        fetch('/loopbot/clear-logs', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    document.getElementById('logContainer').innerHTML = '';
+                }
+            });
+    }
+
+    function updateStatus() {
+        fetch('/loopbot/status')
+            .then(r => r.json())
+            .then(d => {
+                const btnStart = document.getElementById('btnStart');
+                const btnStop = document.getElementById('btnStop');
+                const statusBadge = document.getElementById('botStatus');
+
+                document.getElementById('channelName').textContent = d.channel_name;
+                document.getElementById('channelThumbnail').src = d.channel_thumbnail || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png';
+                document.getElementById('channelSubscribers').textContent = d.channel_subscribers;
+
+                if (d.is_running) {
+                    btnStart.disabled = true;
+                    btnStop.disabled = false;
+                    statusBadge.textContent = "RUNNING";
+                    statusBadge.className = "badge bg-success";
+                } else {
+                    btnStart.disabled = false;
+                    btnStop.disabled = true;
+                    statusBadge.textContent = "STOPPED";
+                    statusBadge.className = "badge bg-secondary";
+                }
+            });
+    }
+
+    function updateLogs() {
+        fetch('/loopbot/logs')
+            .then(r => r.json())
+            .then(d => {
+                const container = document.getElementById('logContainer');
+                container.innerHTML = '';
+                d.logs.forEach(log => {
+                    const div = document.createElement('div');
+                    div.className = "text-light border-bottom border-dark py-1";
+                    div.textContent = log;
+                    container.appendChild(div);
+                });
+                container.scrollTop = container.scrollHeight;
+            });
+    }
+
+    // Poll logs every 3s
+    setInterval(updateLogs, 3000);
+    setInterval(updateStatus, 5000);
+
+    // ==================== RUNNING STREAMS MANAGEMENT ====================
+
+    let runningStreams = [];
+    let streamsPollCount = 0;
+
+    function updateRunningStreams() {
+        // Refresh stats from YouTube every 5th poll (every 10 seconds with 2s interval)
+        streamsPollCount++;
+        const needRefresh = (streamsPollCount % 5 === 0);
+        const url = needRefresh ? '/loopbot/running-streams?refresh=true' : '/loopbot/running-streams';
+
+        fetch(url)
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    runningStreams = d.streams || [];
+                    renderRunningStreams();
+                }
+            })
+            .catch(() => {
+                // Silent fail
+            });
+    }
+
+    function renderRunningStreams() {
+        const tbody = document.getElementById('runningStreamsBody');
+        const countBadge = document.getElementById('runningStreamsCount');
+        const btnStopAll = document.getElementById('btnStopAll');
+
+        countBadge.textContent = runningStreams.length;
+        btnStopAll.disabled = runningStreams.length === 0;
+
+        if (runningStreams.length === 0) {
+            tbody.innerHTML = `
+                <tr id="noStreamsRow">
+                    <td colspan="7" class="text-center text-secondary py-4">
+                        <i class="bi bi-broadcast fs-3 d-block mb-2"></i>
+                        No active streams. Click "Start Loop" to begin.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = runningStreams.map(stream => {
+            const progress = stream.progress || 0;
+            const remaining = stream.remaining || '0m 0s';
+            const statusClass = getStatusClass(stream.status);
+            const statusIcon = getStatusIcon(stream.status);
+
+            return `
+                <tr>
+                    <td><code class="text-info">${escapeHtml(stream.id || '').substring(0, 15)}</code></td>
+                    <td><code class="text-warning">${escapeHtml((stream.stream_key || '').substring(0, 12))}...</code></td>
+                    <td>
+                        <div class="text-truncate" style="max-width: 200px;" title="${escapeHtml(stream.title || '')}">
+                            ${escapeHtml(stream.title || 'Unknown')}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar bg-success progress-bar-striped progress-bar-animated"
+                                 role="progressbar"
+                                 style="width: ${progress}%"
+                                 aria-valuenow="${progress}"
+                                 aria-valuemin="0"
+                                 aria-valuemax="100">
+                                ${remaining}
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge ${statusClass}">
+                            <i class="bi ${statusIcon} me-1"></i>${stream.status || 'Unknown'}
+                        </span>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge bg-info">
+                            <i class="bi bi-eye-fill me-1"></i>${stream.viewers || 0}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-outline-danger btn-sm" onclick="stopSingleStream('${stream.id}')" title="Stop">
+                            <i class="bi bi-stop-fill"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function getStatusClass(status) {
+        switch ((status || '').toLowerCase()) {
+            case 'live': return 'bg-success';
+            case 'starting': return 'bg-warning text-dark';
+            case 'testing': return 'bg-info';
+            case 'ready': return 'bg-primary';
+            case 'stopping': return 'bg-danger';
+            default: return 'bg-secondary';
+        }
+    }
+
+    function getStatusIcon(status) {
+        switch ((status || '').toLowerCase()) {
+            case 'live': return 'bi-broadcast';
+            case 'starting': return 'bi-hourglass-split';
+            case 'testing': return 'bi-gear';
+            case 'ready': return 'bi-check-circle';
+            case 'stopping': return 'bi-stop-circle';
+            default: return 'bi-question-circle';
+        }
+    }
+
+    function stopSingleStream(streamId) {
+        if (!confirm(`Stop stream ${streamId}?`)) return;
+
+        fetch(`/loopbot/stop-stream/${streamId}`, { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    updateRunningStreams();
+                } else {
+                    alert(d.message || 'Failed to stop stream');
+                }
+            })
+            .catch(err => {
+                alert('Error stopping stream: ' + err.message);
+            });
+    }
+
+    function stopAllStreams() {
+        if (!confirm('Stop all running streams?')) return;
+
+        fetch('/loopbot/stop-all-streams', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    updateRunningStreams();
+                } else {
+                    alert(d.message || 'Failed to stop streams');
+                }
+            })
+            .catch(err => {
+                alert('Error stopping streams: ' + err.message);
+            });
+    }
+
+    // Poll running streams every 2s
+    setInterval(updateRunningStreams, 2000);
+    // Initial load
+    updateRunningStreams();
+
+    // ==================== THUMBNAIL MANAGEMENT ====================
+
+    let thumbnailList = [];
+    let thumbnailSelectCallback = null;
+
+    function openThumbnailGallery() {
+        thumbnailSelectCallback = null;
+        document.getElementById('thumbnailSelectMode').classList.add('d-none');
+        loadThumbnailGallery();
+        const modal = new bootstrap.Modal(document.getElementById('thumbnailModal'));
+        modal.show();
+    }
+
+    function openThumbnailPicker() {
+        // Set callback for selection
+        thumbnailSelectCallback = function (url) {
+            document.getElementById('contentThumbnail').value = url;
+            // Show preview
+            document.getElementById('thumbnailPreview').src = url;
+            document.getElementById('thumbnailPreviewContainer').classList.remove('d-none');
+            // Close thumbnail modal
+            bootstrap.Modal.getInstance(document.getElementById('thumbnailModal'))?.hide();
+        };
+        document.getElementById('thumbnailSelectMode').classList.remove('d-none');
+        loadThumbnailGallery();
+
+        // Hide content form modal temporarily, show thumbnail modal
+        bootstrap.Modal.getInstance(document.getElementById('contentFormModal'))?.hide();
+        setTimeout(() => {
+            const modal = new bootstrap.Modal(document.getElementById('thumbnailModal'));
+            modal.show();
+
+            // When thumbnail modal closes, reopen content form
+            document.getElementById('thumbnailModal').addEventListener('hidden.bs.modal', function reopenContentForm() {
+                document.getElementById('thumbnailModal').removeEventListener('hidden.bs.modal', reopenContentForm);
+                setTimeout(() => {
+                    const formModal = new bootstrap.Modal(document.getElementById('contentFormModal'));
+                    formModal.show();
+                }, 300);
+            }, { once: true });
+        }, 300);
+    }
+
+    function clearThumbnail() {
+        document.getElementById('contentThumbnail').value = '';
+        document.getElementById('thumbnailPreview').src = '';
+        document.getElementById('thumbnailPreviewContainer').classList.add('d-none');
+    }
+
+    function loadThumbnailGallery() {
+        fetch('/loopbot/thumbnails')
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    thumbnailList = d.thumbnails || [];
+                    renderThumbnailGallery();
+                }
+            })
+            .catch(() => {
+                thumbnailList = [];
+                renderThumbnailGallery();
+            });
+    }
+
+    function renderThumbnailGallery() {
+        const gallery = document.getElementById('thumbnailGallery');
+        document.getElementById('thumbnailCount').textContent = thumbnailList.length;
+
+        if (thumbnailList.length === 0) {
+            gallery.innerHTML = `
+                <div class="col-12 text-center py-5">
+                    <i class="bi bi-images fs-1 text-secondary d-block mb-2"></i>
+                    <p class="text-secondary">No thumbnails uploaded yet.</p>
+                    <p class="text-secondary">Upload images using the button above.</p>
+                </div>
+            `;
+            return;
+        }
+
+        gallery.innerHTML = thumbnailList.map(thumb => `
+            <div class="col-6 col-md-4 col-lg-3">
+                <div class="card bg-secondary bg-opacity-25 border-secondary thumbnail-card"
+                     style="cursor: pointer;"
+                     onclick="selectThumbnail('${thumb.url}')">
+                    <img src="${thumb.url}" class="card-img-top"
+                         style="height: 100px; object-fit: cover;"
+                         alt="${escapeHtml(thumb.filename)}">
+                    <div class="card-body p-2">
+                        <small class="text-truncate d-block text-light" title="${escapeHtml(thumb.filename)}">
+                            ${escapeHtml(thumb.filename)}
+                        </small>
+                        <small class="text-secondary">${formatFileSize(thumb.size)}</small>
+                        <button class="btn btn-outline-danger btn-sm float-end"
+                                onclick="event.stopPropagation(); deleteThumbnail('${escapeHtml(thumb.filename)}')"
+                                title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function selectThumbnail(url) {
+        if (thumbnailSelectCallback) {
+            thumbnailSelectCallback(url);
+        }
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function uploadThumbnails(event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+
+        const formData = new FormData();
+        for (let i = 0; i < files.length; i++) {
+            formData.append('files', files[i]);
+        }
+
+        // Show loading state
+        const gallery = document.getElementById('thumbnailGallery');
+        gallery.innerHTML = `
+            <div class="col-12 text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="text-secondary mt-2">Uploading ${files.length} file(s)...</p>
+            </div>
+        `;
+
+        fetch('/loopbot/thumbnails/upload', {
+            method: 'POST',
+            body: formData
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    if (d.errors && d.errors.length > 0) {
+                        alert(`Uploaded ${d.count} file(s). Errors:\n${d.errors.join('\n')}`);
+                    } else if (d.count > 0) {
+                        // Silent success - just refresh
+                    }
+                    loadThumbnailGallery();
+                } else {
+                    alert(d.message || 'Failed to upload thumbnails');
+                    loadThumbnailGallery();
+                }
+            })
+            .catch(err => {
+                alert('Error uploading: ' + err.message);
+                loadThumbnailGallery();
+            });
+
+        // Reset input
+        event.target.value = '';
+    }
+
+    function deleteThumbnail(filename) {
+        if (!confirm(`Delete thumbnail "${filename}"?`)) return;
+
+        fetch(`/loopbot/thumbnails/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    loadThumbnailGallery();
+                } else {
+                    alert(d.message || 'Failed to delete thumbnail');
+                }
+            })
+            .catch(err => {
+                alert('Error deleting: ' + err.message);
+            });
+    }
+
+    // Drag & Drop support for thumbnail upload
+    document.addEventListener('DOMContentLoaded', function () {
+        const dropZone = document.getElementById('uploadDropZone');
+        if (dropZone) {
+            dropZone.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                dropZone.classList.add('border-primary');
+            });
+
+            dropZone.addEventListener('dragleave', function (e) {
+                e.preventDefault();
+                dropZone.classList.remove('border-primary');
+            });
+
+            dropZone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                dropZone.classList.remove('border-primary');
+
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    // Create a fake event object for uploadThumbnails
+                    uploadThumbnails({ target: { files: files, value: '' } });
+                }
+            });
+        }
+
+        // Load saved settings on page load
+        loadSettings();
+    });
+
+    // ==================== SETTINGS MANAGEMENT ====================
+
+    function loadSettings() {
+        fetch('/loopbot/settings')
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && d.settings) {
+                    const s = d.settings;
+
+                    // Duration
+                    if (s.duration_hours !== undefined) document.getElementById('durationHours').value = s.duration_hours;
+                    if (s.duration_minutes !== undefined) document.getElementById('durationMinutes').value = s.duration_minutes;
+                    if (s.duration_seconds !== undefined) document.getElementById('durationSeconds').value = s.duration_seconds;
+
+                    // Other settings
+                    if (s.delay_minutes !== undefined) document.getElementById('delayMinutes').value = s.delay_minutes;
+                    if (s.max_streams !== undefined) document.getElementById('maxStreams').value = s.max_streams;
+                    if (s.max_duplicates !== undefined) document.getElementById('maxDuplicates').value = s.max_duplicates;
+
+                    // Checkboxes
+                    if (s.filter_low_viewers !== undefined) document.getElementById('filterLowViewers').checked = s.filter_low_viewers;
+                    if (s.auto_rotate_title !== undefined) document.getElementById('autoRotateTitle').checked = s.auto_rotate_title;
+                    if (s.randomize_content !== undefined) document.getElementById('randomizeContent').checked = s.randomize_content;
+                    if (s.avoid_duplicates !== undefined) document.getElementById('avoidDuplicates').checked = s.avoid_duplicates;
+                }
+            })
+            .catch(() => {
+                // Silent fail - use default values
+            });
+    }
+</script>
+{% endblock %}

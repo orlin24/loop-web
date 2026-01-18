@@ -1,0 +1,702 @@
+{% extends "layout.html" %} {% block content %}
+<div class="container mt-4">
+  <!-- Header Section - Diperbarui -->
+  <div
+    class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4"
+  >
+    <div class="d-flex flex-column flex-md-row align-items-center w-100">
+      <h1 class="text-primary mb-3 mb-md-0 me-md-4">
+        <i class="bi bi-collection-play me-2"></i>Manajemen Live Stream
+      </h1>
+
+      <!-- Current Time - Dipindahkan di sini -->
+      <div class="d-flex align-items-center ms-md-auto">
+        <i class="bi bi-clock-history me-2 text-warning fs-3"></i>
+        <span
+          id="currentDateTime"
+          class="fst-italic text-warning fs-4 fw-bold"
+        ></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Stats Container -->
+  <div class="bg-dark p-4 rounded-3 shadow mb-4" style="width: 100%">
+    <div class="d-flex flex-wrap justify-content-center gap-4">
+      <!-- CPU Usage -->
+      <div class="system-stat text-center px-4 py-3">
+        <div class="stat-label text-info mb-3">
+          <i class="bi bi-cpu me-2 fs-1"></i
+          ><span class="fs-3 fw-bold">CPU USAGE</span>
+        </div>
+        <div class="stat-value mb-3 fs-1 fw-bold" id="cpu-stat">0%</div>
+        <div class="progress mt-1 mx-auto" style="height: 20px; width: 250px">
+          <div
+            id="cpu-progress"
+            class="progress-bar"
+            style="width: 0%; height: 100%"
+            role="progressbar"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Memory -->
+      <div class="system-stat text-center px-4 py-3">
+        <div class="stat-label text-success mb-3">
+          <i class="bi bi-memory me-2 fs-1"></i
+          ><span class="fs-3 fw-bold">MEMORY</span>
+        </div>
+        <div class="stat-value mb-3 fs-1 fw-bold" id="memory-stat">0/0</div>
+        <div class="progress mt-1 mx-auto" style="height: 20px; width: 250px">
+          <div
+            id="memory-progress"
+            class="progress-bar"
+            style="width: 0%; height: 100%"
+            role="progressbar"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Internet Speed -->
+      <div class="system-stat text-center px-4 py-3">
+        <div class="stat-label text-warning mb-3">
+          <i class="bi bi-wifi me-2 fs-1"></i
+          ><span class="fs-3 fw-bold">INTERNET</span>
+        </div>
+        <div class="stat-value">
+          <div id="download-stat" class="fs-2 fw-bold mb-2">↓ 0 Kbps</div>
+          <div id="upload-stat" class="fs-2 fw-bold">↑ 0 Mbps</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter Section -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-8">
+      <div class="input-group shadow-lg">
+        <span class="input-group-text bg-dark border-dark text-secondary fs-5">
+          <i class="bi bi-search"></i>
+        </span>
+        <input
+          type="search"
+          class="form-control bg-dark text-light border-dark fs-5 py-2"
+          id="searchInput"
+          placeholder="Cari berdasarkan judul stream..."
+        />
+      </div>
+    </div>
+    <div class="col-md-4">
+      <select
+        class="form-select bg-dark text-light border-dark shadow-lg fs-5 py-2"
+        id="statusFilter"
+      >
+        <option value="all">Semua Status</option>
+        <option value="active">Sedang Live</option>
+        <option value="scheduled">Terjadwal</option>
+        <option value="stopped">Selesai</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Stream Groups -->
+  <div class="row row-cols-1 row-cols-lg-3 g-4">
+    <!-- Active Streams -->
+    <div class="col">
+      <div class="card border-success h-100 shadow-lg">
+        <div
+          class="card-header bg-success d-flex justify-content-between align-items-center py-3"
+        >
+          <h5 class="mb-0 text-light fs-4">
+            <i class="bi bi-broadcast-pin me-2"></i>Aktif
+          </h5>
+          <span
+            class="badge bg-light text-success fs-5 py-2 px-3"
+            id="activeLiveCount"
+            >0</span
+          >
+        </div>
+        <div class="card-body p-2">
+          <div class="list-group list-group-flush" id="activeLiveList">
+            {% for id, info in lives.items() if info['status'] == 'Active' %}
+            <a
+              href="/live_info/{{ id }}"
+              class="list-group-item list-group-item-action bg-dark text-light border-secondary live-item py-3"
+              data-status="active"
+            >
+              <div class="d-flex justify-content-between align-items-start">
+                <div class="me-2">
+                  <h6 class="mb-1 text-truncate fs-5">{{ info['title'] }}</h6>
+                  <small class="text-secondary fs-6"
+                    >{{ info['startTime'] }}</small
+                  >
+                </div>
+                <i class="bi bi-chevron-right text-secondary fs-4"></i>
+              </div>
+            </a>
+            {% else %}
+            <div
+              class="text-center py-4 text-secondary fs-5"
+              id="noActiveStreams"
+            >
+              <i class="bi bi-info-circle me-2"></i>Tidak ada stream aktif
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scheduled Streams -->
+    <div class="col">
+      <div class="card border-warning h-100 shadow-lg">
+        <div
+          class="card-header bg-warning d-flex justify-content-between align-items-center py-3"
+        >
+          <h5 class="mb-0 text-dark fs-4">
+            <i class="bi bi-calendar-event me-2"></i>Terjadwal
+          </h5>
+          <span
+            class="badge bg-light text-warning fs-5 py-2 px-3"
+            id="scheduledLiveCount"
+            >0</span
+          >
+        </div>
+        <div class="card-body p-2">
+          <div class="list-group list-group-flush" id="scheduledLiveList">
+            {% for id, info in lives.items() if info['status'] == 'Scheduled' %}
+            <a
+              href="/live_info/{{ id }}"
+              class="list-group-item list-group-item-action bg-dark text-light border-secondary live-item py-3"
+              data-status="scheduled"
+            >
+              <div class="d-flex justify-content-between align-items-start">
+                <div class="me-2">
+                  <h6 class="mb-1 text-truncate fs-5">{{ info['title'] }}</h6>
+                  <small class="text-secondary fs-6"
+                    >{{ info['startTime'] }}</small
+                  >
+                </div>
+                <i class="bi bi-chevron-right text-secondary fs-4"></i>
+              </div>
+            </a>
+            {% else %}
+            <div
+              class="text-center py-4 text-secondary fs-5"
+              id="noScheduledStreams"
+            >
+              <i class="bi bi-info-circle me-2"></i>Tidak ada jadwal
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stopped Streams -->
+    <div class="col">
+      <div class="card border-danger h-100 shadow-lg">
+        <div
+          class="card-header bg-danger d-flex justify-content-between align-items-center py-3"
+        >
+          <h5 class="mb-0 text-light fs-4">
+            <i class="bi bi-stop-circle me-2"></i>Selesai
+          </h5>
+          <span
+            class="badge bg-light text-danger fs-5 py-2 px-3"
+            id="stoppedLiveCount"
+            >0</span
+          >
+        </div>
+        <div class="card-body p-2">
+          <div class="list-group list-group-flush" id="stoppedLiveList">
+            {% for id, info in lives.items() if info['status'] == 'Stopped' %}
+            <a
+              href="/live_info/{{ id }}"
+              class="list-group-item list-group-item-action bg-dark text-light border-secondary live-item py-3"
+              data-status="stopped"
+            >
+              <div class="d-flex justify-content-between align-items-start">
+                <div class="me-2">
+                  <h6 class="mb-1 text-truncate fs-5">{{ info['title'] }}</h6>
+                  <small class="text-secondary fs-6"
+                    >{{ info['startTime'] }}</small
+                  >
+                </div>
+                <i class="bi bi-chevron-right text-secondary fs-4"></i>
+              </div>
+            </a>
+            {% else %}
+            <div
+              class="text-center py-4 text-secondary fs-5"
+              id="noStoppedStreams"
+            >
+              <i class="bi bi-info-circle me-2"></i>Tidak ada riwayat
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // =====================
+  // INITIALIZATION
+  // =====================
+  document.addEventListener("DOMContentLoaded", () => {
+    initializeDateTime();
+    updateLiveCounts();
+    setupEventListeners();
+    startPolling();
+    updateSystemStats(); // Initialize system stats
+  });
+
+  // =====================
+  // CORE FUNCTIONS
+  // =====================
+  function initializeDateTime() {
+    const updateTime = () => {
+      const options = {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      };
+      document.getElementById("currentDateTime").textContent =
+        new Date().toLocaleDateString("id-ID", options);
+    };
+
+    // Panggil sekali saat inisialisasi
+    updateTime();
+    // Perbarui setiap detik
+    setInterval(updateTime, 1000);
+  }
+
+  function updateLiveCounts() {
+    const counters = {
+      active: document.querySelectorAll("#activeLiveList .live-item").length,
+      scheduled: document.querySelectorAll("#scheduledLiveList .live-item")
+        .length,
+      stopped: document.querySelectorAll("#stoppedLiveList .live-item").length,
+    };
+
+    document.getElementById("activeLiveCount").textContent = counters.active;
+    document.getElementById("scheduledLiveCount").textContent =
+      counters.scheduled;
+    document.getElementById("stoppedLiveCount").textContent = counters.stopped;
+
+    document.getElementById("noActiveStreams").style.display = counters.active
+      ? "none"
+      : "block";
+    document.getElementById("noScheduledStreams").style.display =
+      counters.scheduled ? "none" : "block";
+    document.getElementById("noStoppedStreams").style.display = counters.stopped
+      ? "none"
+      : "block";
+  }
+
+  function updateLiveLists(lives) {
+    const activeLiveList = document.getElementById("activeLiveList");
+    const scheduledLiveList = document.getElementById("scheduledLiveList");
+    const stoppedLiveList = document.getElementById("stoppedLiveList");
+
+    activeLiveList.innerHTML = "";
+    scheduledLiveList.innerHTML = "";
+    stoppedLiveList.innerHTML = "";
+
+    for (const [id, info] of Object.entries(lives)) {
+      const listItem = document.createElement("a");
+      listItem.href = `/live_info/${id}`;
+      listItem.className =
+        "list-group-item list-group-item-action bg-dark text-light border-secondary live-item py-3";
+      listItem.dataset.status = info.status;
+
+      const itemContent = `
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="me-2">
+                        <h6 class="mb-1 text-truncate fs-5">${info.title}</h6>
+                        <small class="text-secondary fs-6">${info.startTime}</small>
+                    </div>
+                    <i class="bi bi-chevron-right text-secondary fs-4"></i>
+                </div>
+            `;
+      listItem.innerHTML = itemContent;
+
+      if (info.status === "Active") {
+        activeLiveList.appendChild(listItem);
+      } else if (info.status === "Scheduled") {
+        scheduledLiveList.appendChild(listItem);
+      } else if (info.status === "Stopped") {
+        stoppedLiveList.appendChild(listItem);
+      }
+    }
+
+    updateLiveCounts();
+    handleFilter();
+  }
+
+  function startPolling() {
+    setInterval(() => {
+      fetch("/all_live_info")
+        .then((response) => response.json())
+        .then((data) => {
+          updateLiveLists(data);
+        })
+        .catch((error) => console.error("Error fetching live info:", error));
+    }, 5000); // Polling interval: 5 seconds
+  }
+
+  // =================================
+  // REAL-TIME SYSTEM STATS
+  // =================================
+  function updateSystemStats() {
+    fetch("/system_stats")
+      .then((response) => response.json())
+      .then((data) => {
+        // Update CPU
+        document.getElementById("cpu-stat").textContent = data.cpu;
+        document.getElementById("cpu-progress").style.width = data.cpu;
+        document
+          .getElementById("cpu-progress")
+          .setAttribute("aria-valuenow", parseFloat(data.cpu));
+
+        // Update color based on CPU usage
+        const cpuValue = parseFloat(data.cpu);
+        const cpuBar = document.getElementById("cpu-progress");
+        cpuBar.classList.remove("bg-danger", "bg-warning", "bg-info");
+        if (cpuValue > 80) cpuBar.classList.add("bg-danger");
+        else if (cpuValue > 60) cpuBar.classList.add("bg-warning");
+        else cpuBar.classList.add("bg-info");
+
+        // Update Memory
+        document.getElementById("memory-stat").textContent = data.memory;
+        document.getElementById(
+          "memory-progress"
+        ).style.width = `${data.memory_percent}%`;
+        document
+          .getElementById("memory-progress")
+          .setAttribute("aria-valuenow", data.memory_percent);
+
+        // Update color based on Memory usage
+        const memBar = document.getElementById("memory-progress");
+        memBar.classList.remove("bg-danger", "bg-warning", "bg-success");
+        if (data.memory_percent > 80) memBar.classList.add("bg-danger");
+        else if (data.memory_percent > 60) memBar.classList.add("bg-warning");
+        else memBar.classList.add("bg-success");
+
+        // Update Network
+        document.getElementById(
+          "download-stat"
+        ).textContent = `↓ ${data.download}`;
+        document.getElementById("upload-stat").textContent = `↑ ${data.upload}`;
+      })
+      .catch((error) => console.error("Error fetching system stats:", error));
+  }
+
+  // Update system stats every 2 seconds
+  setInterval(updateSystemStats, 2000);
+
+  // =====================
+  // FILTERING SYSTEM
+  // =====================
+  function setupEventListeners() {
+    const searchInput = document.getElementById("searchInput");
+    const statusFilter = document.getElementById("statusFilter");
+
+    searchInput.addEventListener("input", handleFilter);
+    statusFilter.addEventListener("change", handleFilter);
+  }
+
+  function handleFilter() {
+    const searchTerm = document
+      .getElementById("searchInput")
+      .value.toLowerCase();
+    const statusFilter = document.getElementById("statusFilter").value;
+
+    document.querySelectorAll(".live-item").forEach((item) => {
+      const title = item.querySelector("h6").textContent.toLowerCase();
+      const status = item.dataset.status;
+      const matchesSearch = title.includes(searchTerm);
+      const matchesStatus = statusFilter === "all" || statusFilter === status;
+
+      item.style.display = matchesSearch && matchesStatus ? "" : "none";
+    });
+
+    updateVisibleCounts();
+  }
+
+  function updateVisibleCounts() {
+    const visibleCount = (selector) =>
+      document.querySelectorAll(`${selector} .live-item:not([style*="none"])`)
+        .length;
+
+    document.getElementById("activeLiveCount").textContent =
+      visibleCount("#activeLiveList");
+    document.getElementById("scheduledLiveCount").textContent =
+      visibleCount("#scheduledLiveList");
+    document.getElementById("stoppedLiveCount").textContent =
+      visibleCount("#stoppedLiveList");
+  }
+
+  // =====================
+  // UTILITY FUNCTIONS
+  // =====================
+  function refreshPage() {
+    window.location.reload();
+  }
+
+  // =====================
+  // ENHANCEMENTS
+  // =====================
+  document.querySelectorAll(".list-group-item").forEach((item) => {
+    item.addEventListener("mouseenter", () => {
+      item.style.transform = "translateX(5px)";
+      item.style.transition = "transform 0.2s ease";
+    });
+
+    item.addEventListener("mouseleave", () => {
+      item.style.transform = "translateX(0)";
+    });
+  });
+</script>
+
+<style>
+  .card {
+    background-color: #1a1a1a;
+    border-radius: 12px;
+    transition: transform 0.3s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .list-group-item {
+    background-color: #1a1a1a;
+    border-color: #2d2d2d;
+    transition: all 0.2s ease;
+  }
+
+  .list-group-item:hover {
+    background-color: #2d2d2d;
+    transform: scale(1.02);
+  }
+
+  .form-control:focus {
+    background-color: #2d2d2d;
+    border-color: #0066cc;
+    box-shadow: 0 0 0 0.25rem rgba(0, 102, 204, 0.25);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #0066cc;
+    border-radius: 5px;
+  }
+
+  /* SYSTEM STATS STYLING - BESAR DAN MENCOLOK */
+  .system-stat {
+    min-width: 280px;
+    padding: 20px 25px;
+    background-color: rgba(30, 30, 40, 0.7);
+    border-radius: 15px;
+    transition: all 0.3s ease;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+    border: 2px solid rgba(100, 100, 150, 0.3);
+  }
+
+  .system-stat:hover {
+    transform: translateY(-5px);
+    background-color: rgba(40, 40, 60, 0.8);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.6);
+  }
+
+  .stat-label {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    margin-bottom: 15px;
+  }
+
+  .stat-value {
+    font-size: 2.2rem;
+    font-family: "Courier New", monospace;
+    font-weight: bold;
+    margin-bottom: 20px;
+  }
+
+  .progress {
+    background-color: #2d2d2d;
+    border-radius: 10px;
+    height: 20px;
+    box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.5);
+  }
+
+  .progress-bar {
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+    transition: width 1s ease-in-out;
+  }
+
+  /* Warna untuk progress bar */
+  .bg-info {
+    background-color: #17a2b8;
+  }
+  .bg-success {
+    background-color: #28a745;
+  }
+  .bg-warning {
+    background-color: #ffc107;
+  }
+  .bg-danger {
+    background-color: #dc3545;
+  }
+
+  /* Responsiveness */
+  @media (max-width: 1400px) {
+    .system-stat {
+      min-width: 250px;
+      padding: 18px 22px;
+    }
+
+    .stat-label {
+      font-size: 1.3rem;
+    }
+
+    .stat-value {
+      font-size: 2rem;
+    }
+  }
+
+  @media (max-width: 1200px) {
+    .system-stat {
+      min-width: 220px;
+      padding: 16px 20px;
+    }
+
+    .stat-label {
+      font-size: 1.2rem;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+    }
+
+    .progress {
+      width: 200px !important;
+    }
+  }
+
+  @media (max-width: 992px) {
+    .system-stat {
+      min-width: 100%;
+      margin-bottom: 25px;
+      padding: 25px;
+    }
+
+    .stat-label {
+      font-size: 1.6rem;
+    }
+
+    .stat-value {
+      font-size: 2.4rem;
+    }
+
+    .progress {
+      width: 100% !important;
+      max-width: 350px;
+      height: 25px;
+      margin: 0 auto;
+    }
+
+    #download-stat,
+    #upload-stat {
+      font-size: 2rem !important;
+    }
+
+    #currentDateTime {
+      font-size: 1.4rem !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .stat-label {
+      font-size: 1.4rem;
+    }
+
+    .stat-value {
+      font-size: 2rem;
+    }
+
+    #download-stat,
+    #upload-stat {
+      font-size: 1.8rem !important;
+    }
+
+    #currentDateTime {
+      font-size: 1.2rem !important;
+    }
+
+    .card-header h5 {
+      font-size: 1.3rem !important;
+    }
+
+    .badge {
+      font-size: 1.2rem !important;
+    }
+
+    .list-group-item h6 {
+      font-size: 1.1rem !important;
+    }
+  }
+
+  @media (max-width: 576px) {
+    .stat-label {
+      font-size: 1.2rem;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+    }
+
+    #download-stat,
+    #upload-stat {
+      font-size: 1.5rem !important;
+    }
+
+    #currentDateTime {
+      font-size: 1.1rem !important;
+    }
+
+    .card-header h5 {
+      font-size: 1.1rem !important;
+    }
+
+    .badge {
+      font-size: 1rem !important;
+    }
+
+    .list-group-item h6 {
+      font-size: 1rem !important;
+    }
+
+    .progress {
+      height: 18px;
+    }
+  }
+</style>
+{% endblock %}

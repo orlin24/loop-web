@@ -1,0 +1,11 @@
+{
+  "bot_token": "7571556267:AAEEwZJddj8Yv5I20npub9BZXeFafIyvzWI",
+  "chat_id": "583901942",
+  "enabled": true,
+  "notifications": {
+    "stream_start": true,
+    "stream_end": true,
+    "errors": true,
+    "viewer_milestones": [10, 50, 100]
+  }
+}

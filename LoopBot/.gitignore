@@ -1,0 +1,28 @@
+# Sensitive files
+client_secrets.json
+token.pickle
+*.pickle
+.license_cache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug files
+debug.log
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*.bak
+*.backup
