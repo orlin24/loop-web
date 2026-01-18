@@ -20,7 +20,7 @@ Ikuti langkah-langkah berikut untuk menginstal BadutStream di VPS Anda:
    Buka terminal di VPS Anda dan jalankan perintah berikut untuk mengunduh dan menjalankan installer:
 
    ```bash
-   wget -O installer.sh https://raw.githubusercontent.com/orlin24/badutstream/main/installer.sh
+   wget -O installer.sh https://raw.githubusercontent.com/orlin24/loop-web/main/installer.sh
    chmod +x installer.sh
    ./installer.sh
    ```
