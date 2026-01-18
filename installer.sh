@@ -64,6 +64,15 @@ fi
 # Jalankan Aplikasi di dalam tmux session (default: loop-web)
 echo -e "\e[32mStarting application in tmux session 'loop-web'...\e[0m"
 if [ -f "app.py" ]; then
+    # Cek apakah sesi tmux sudah ada, jika ada matikan dulu
+    if tmux has-session -t loop-web 2>/dev/null; then
+        echo -e "\e[33mExisting tmux session 'loop-web' found. Killing it...\e[0m"
+        tmux kill-session -t loop-web
+    fi
+    
+    # Tunggu sebentar untuk memastikan port 5000 terlepas
+    sleep 2
+    
     tmux new-session -d -s loop-web "cd $(pwd) && source venv/bin/activate && python3 app.py; exec bash"
 else
     echo -e "\e[32mError: app.py not found. Skipping tmux session.\e[0m"
