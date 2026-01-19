@@ -68,11 +68,11 @@ def auth():
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         client_secrets, scopes=scopes)
     
-    # Needs to match the redirect URI registered in console
-    # Force HTTPS when running behind Nginx/Proxy
-    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True, _scheme='https')
+    # Force exact match with Google Cloud Console
+    # This solves issues where Nginx might pass 'www' or 'http' unexpectedly
+    flow.redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
     
-    print(f"DEBUG: Generated Redirect URI: {flow.redirect_uri}") # Debugging
+    print(f"DEBUG: Using Hardcoded Redirect URI: {flow.redirect_uri}") # Debugging
     
     authorization_url, state = flow.authorization_url(
         access_type='offline',
@@ -83,17 +83,24 @@ def auth():
 
 @loopbot_bp.route('/loopbot/oauth2callback')
 def oauth2callback():
-    state = session['state']
+    state = session.get('state')
+    if not state:
+        return "Session state missing (cookie lost?). Try clearing browser cookies.", 400
     
     client_secrets = loop_bot.get_client_secrets_path()
     scopes = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.force-ssl']
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         client_secrets, scopes=scopes, state=state)
         
-    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True, _scheme='https')
+    # MUST match exactly what was sent in auth()
+    flow.redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
     print(f"DEBUG: Callback Redirect URI: {flow.redirect_uri}") # Debugging
     
     authorization_response = request.url
+    # Fix for http vs https in callback URL if Nginx didn't rewrite it perfectly
+    if authorization_response.startswith('http:'):
+        authorization_response = authorization_response.replace('http:', 'https:', 1)
+
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     
     try:
