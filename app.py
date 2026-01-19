@@ -101,9 +101,24 @@ else:
 # 🔹 AUTHENTIKASI & LOGIN
 # ==============================
 
-users = {
-    "admin": "admin",
-}
+# Load users from users.json if exists
+users_file = os.path.join(BASE_DIR, 'users.json')
+default_users = {"admin": "admin"}
+
+if os.path.exists(users_file):
+    try:
+        with open(users_file, 'r') as f:
+            file_users = json.load(f)
+            # Support both format {"user": "pass"} and {"username": "u", "password": "p"}
+            if "username" in file_users and "password" in file_users:
+                 users = {file_users["username"]: file_users["password"]}
+            else:
+                 users = file_users
+    except Exception as e:
+        logging.error(f"Failed to load users.json: {e}")
+        users = default_users
+else:
+    users = default_users
 
 def login_required(f):
     @wraps(f)
