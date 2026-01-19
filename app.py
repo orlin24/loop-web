@@ -103,7 +103,7 @@ else:
 
 # Load users from users.json if exists
 users_file = os.path.join(BASE_DIR, 'users.json')
-default_users = {"admin": "admin"}
+default_users = {"admin": "24ciumdulu"}
 
 if os.path.exists(users_file):
     try:
