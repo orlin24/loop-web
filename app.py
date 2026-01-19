@@ -26,6 +26,10 @@ app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'e3f1a2b4c6d8e0f9a7b5c3d1e9f2a4c6d8b0e1f3a5c7d9e2b4c6d8a0f1e3b5')  # Load from env
 CORS(app)  # Enable CORS for all routes
 
+# Fix headers when running behind a proxy (like Nginx)
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 # Register LoopBot Blueprint
 from loopbot_bp import loopbot_bp
 app.register_blueprint(loopbot_bp)
@@ -1012,7 +1016,7 @@ def set_telegram_bot():
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                 "client_secret": client_secret,
-                "redirect_uris": [f"http://localhost:5000/loopbot/oauth2callback"]
+                "redirect_uris": [f"{request.scheme}://{request.host}/loopbot/oauth2callback"]
             }
         }
         # Save to LoopBot directory for authentication to work
