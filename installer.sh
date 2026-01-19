@@ -14,6 +14,8 @@ echo -e "\e[32mConfiguring firewall...\e[0m"
 sudo ufw allow OpenSSH  # Mengizinkan akses SSH (port 22)
 sudo ufw allow 5000/tcp  # Untuk aplikasi Python (Flask/FastAPI) di port 5000
 sudo ufw allow 1935/tcp  # Untuk RTMP server
+sudo ufw allow 80/tcp    # HTTP (Nginx)
+sudo ufw allow 443/tcp   # HTTPS (Nginx SSL)
 echo -e "\e[32mEnabling UFW...\e[0m"
 echo "y" | sudo ufw enable
 

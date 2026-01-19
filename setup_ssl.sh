@@ -19,6 +19,12 @@ echo -e "\e[32mInstalling Nginx and Certbot...\e[0m"
 sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
 
+echo -e "\e[32mConfiguring Firewall for Web Access...\e[0m"
+sudo ufw allow 'Nginx Full'
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload
+
 echo -e "\e[32mConfiguring Nginx for $DOMAIN_NAME...\e[0m"
 
 # Create Nginx config
