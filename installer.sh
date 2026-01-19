@@ -1,90 +1,260 @@
 #!/bin/bash
-set -e  # Menghentikan script jika ada perintah yang gagal
+# LoopWeb Auto Installer
+# Usage: wget -O installer.sh https://raw.githubusercontent.com/orlin24/loop-web/main/installer.sh && chmod +x installer.sh && sudo ./installer.sh
 
-# Update & Upgrade Sistem
-echo -e "\e[32mUpdating and upgrading system...\e[0m"
-sudo apt update && sudo apt upgrade -y
+set -e
 
-# Install Git
-echo -e "\e[32mInstalling Git...\e[0m"
-apt install git -y
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Konfigurasi Firewall
-echo -e "\e[32mConfiguring firewall...\e[0m"
-sudo ufw allow OpenSSH  # Mengizinkan akses SSH (port 22)
-sudo ufw allow 5000/tcp  # Untuk aplikasi Python (Flask/FastAPI) di port 5000
-sudo ufw allow 1935/tcp  # Untuk RTMP server
-sudo ufw allow 80/tcp    # HTTP (Nginx)
-sudo ufw allow 443/tcp   # HTTPS (Nginx SSL)
-echo -e "\e[32mEnabling UFW...\e[0m"
-echo "y" | sudo ufw enable
+echo -e "${BLUE}"
+echo "╔══════════════════════════════════════════╗"
+echo "║        LoopWeb Auto Installer            ║"
+echo "║     YouTube Live Streaming Bot           ║"
+echo "╚══════════════════════════════════════════╝"
+echo -e "${NC}"
 
-# Pastikan direktori /var/www/html ada
-echo -e "\e[32mEnsuring /var/www/html exists...\e[0m"
-sudo mkdir -p /var/www/html
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}Please run as root: sudo ./installer.sh${NC}"
+    exit 1
+fi
 
-# Pindah ke Direktori Web
+# Installation mode
+echo -e "${YELLOW}Select installation mode:${NC}"
+echo "1) Full Install with SSL (requires domain)"
+echo "2) Basic Install (IP only, no SSL)"
+read -p "Enter choice [1/2]: " INSTALL_MODE
+
+DOMAIN=""
+EMAIL=""
+USE_SSL=false
+
+if [ "$INSTALL_MODE" == "1" ]; then
+    USE_SSL=true
+    read -p "Enter your domain (e.g., loopbotiq.com): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}Domain is required for SSL installation!${NC}"
+        exit 1
+    fi
+    read -p "Enter your email for SSL certificate: " EMAIL
+    if [ -z "$EMAIL" ]; then
+        echo -e "${RED}Email is required for SSL!${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}Installing with SSL for domain: ${DOMAIN}${NC}"
+else
+    echo -e "${YELLOW}Installing basic mode (no SSL)${NC}"
+fi
+
+echo ""
+read -p "Press Enter to continue or Ctrl+C to cancel..."
+
+# ========================================
+# Step 1: Update System & Install Dependencies
+# ========================================
+echo -e "${GREEN}[1/7] Updating system and installing dependencies...${NC}"
+apt-get update
+apt-get upgrade -y
+apt-get install -y python3 python3-pip python3-venv ffmpeg git curl tmux
+
+if [ "$USE_SSL" = true ]; then
+    apt-get install -y nginx certbot python3-certbot-nginx
+fi
+
+# ========================================
+# Step 2: Configure Firewall
+# ========================================
+echo -e "${GREEN}[2/7] Configuring firewall...${NC}"
+ufw allow OpenSSH
+ufw allow 5000/tcp
+ufw allow 1935/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+echo "y" | ufw enable
+
+# ========================================
+# Step 3: Clone Repository
+# ========================================
+echo -e "${GREEN}[3/7] Cloning LoopWeb repository...${NC}"
+mkdir -p /var/www/html
 cd /var/www/html
 
-# Clone Repository dari GitHub jika belum ada
-if [ ! -d "loop-web" ]; then
-    echo -e "\e[32mCloning repository...\e[0m"
-    git clone https://github.com/orlin24/loop-web.git
-else
-    echo -e "\e[32mRepository 'loop-web' already exists. Pulling latest changes...\e[0m"
+if [ -d "loop-web" ]; then
+    echo -e "${YELLOW}Existing installation found. Updating...${NC}"
     cd loop-web
     git pull
     cd ..
+else
+    git clone https://github.com/orlin24/loop-web.git
 fi
 
 cd loop-web
 
-# Beri Izin Akses yang Lebih Aman
-echo -e "\e[32mSetting folder permissions to 755 and ownership to www-data...\e[0m"
-sudo chmod -R 755 .
-sudo chown -R www-data:www-data .
+# Create required directories
+mkdir -p uploads
+mkdir -p LoopBot/thumbnails
+mkdir -p LoopBot/content
+mkdir -p logs
 
-# Set Zona Waktu
-echo -e "\e[32mSetting timezone to Asia/Jakarta...\e[0m"
-sudo timedatectl set-timezone Asia/Jakarta
-
-# Install Python Virtual Environment, FFmpeg, tmux, dan pip
-echo -e "\e[32mInstalling python3.10-venv, ffmpeg, tmux, and python3-pip...\e[0m"
-sudo apt install python3.10-venv ffmpeg tmux python3-pip -y
-
-# Buat Virtual Environment dan Install Dependencies
-echo -e "\e[32mCreating virtual environment and installing dependencies...\e[0m"
+# ========================================
+# Step 4: Setup Python Environment
+# ========================================
+echo -e "${GREEN}[4/7] Setting up Python virtual environment...${NC}"
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
+pip install -r requirements.txt
+deactivate
+
+# ========================================
+# Step 5: Set Permissions
+# ========================================
+echo -e "${GREEN}[5/7] Setting permissions...${NC}"
+timedatectl set-timezone Asia/Jakarta
+chown -R www-data:www-data /var/www/html/loop-web
+chmod -R 755 /var/www/html/loop-web
+chmod 700 /var/www/html/loop-web/LoopBot
+
+# ========================================
+# Step 6: Setup Nginx & SSL (if enabled)
+# ========================================
+if [ "$USE_SSL" = true ]; then
+    echo -e "${GREEN}[6/7] Configuring Nginx and SSL...${NC}"
+
+    cat > /etc/nginx/sites-available/loopweb << EOF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+    }
+
+    client_max_body_size 500M;
+}
+EOF
+
+    ln -sf /etc/nginx/sites-available/loopweb /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t
+    systemctl restart nginx
+
+    # Get SSL certificate
+    certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL} --redirect
+
+    # Setup auto-renewal
+    (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
 else
-    echo -e "\e[32mrequirements.txt not found. Skipping dependency installation.\e[0m"
+    echo -e "${GREEN}[6/7] Skipping Nginx/SSL (basic mode)...${NC}"
 fi
 
-# Jalankan Aplikasi di dalam tmux session (default: loop-web)
-echo -e "\e[32mStarting application in tmux session 'loop-web'...\e[0m"
-if [ -f "app.py" ]; then
-    # Cek apakah sesi tmux sudah ada, jika ada matikan dulu
-    if tmux has-session -t loop-web 2>/dev/null; then
-        echo -e "\e[33mExisting tmux session 'loop-web' found. Killing it...\e[0m"
-        tmux kill-session -t loop-web
-    fi
-    
-    # Tunggu sebentar untuk memastikan port 5000 terlepas
-    sleep 2
-    
-    tmux new-session -d -s loop-web "cd $(pwd) && source venv/bin/activate && python3 app.py; exec bash"
-else
-    echo -e "\e[32mError: app.py not found. Skipping tmux session.\e[0m"
+# ========================================
+# Step 7: Setup Systemd Service
+# ========================================
+echo -e "${GREEN}[7/7] Setting up systemd service...${NC}"
+
+cat > /etc/systemd/system/loopweb.service << 'EOF'
+[Unit]
+Description=LoopWeb YouTube Streaming Bot
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html/loop-web
+Environment="PATH=/var/www/html/loop-web/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/var/www/html/loop-web/venv/bin/python app.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Setup logrotate
+cat > /etc/logrotate.d/loopweb << 'EOF'
+/var/www/html/loop-web/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 www-data www-data
+}
+EOF
+
+# Setup maintenance cron
+cat > /etc/cron.d/loopweb-maintenance << 'EOF'
+0 3 * * * root find /var/www/html/loop-web/uploads -name "*.tmp" -mtime +1 -delete 2>/dev/null
+0 4 * * 0 root find /var/www/html/loop-web/logs -name "*.log.*" -mtime +30 -delete 2>/dev/null
+EOF
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable loopweb
+systemctl start loopweb
+
+if [ "$USE_SSL" = true ]; then
+    systemctl restart nginx
 fi
 
-# Mendapatkan IP VPS
+# Get IP
 IP=$(hostname -I | awk '{print $1}')
 
-echo -e "\e[32mLoopstream Berhasil di Install. Access via: http://$IP:5000\e[0m"
-echo -e "\e[33mUsername: admin\e[0m"
-echo -e "\e[33mPassword: admin\e[0m"
+# ========================================
+# Done!
+# ========================================
+echo ""
+echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║      Installation Complete!              ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo ""
 
+if [ "$USE_SSL" = true ]; then
+    echo -e "${BLUE}Your LoopWeb is now running at:${NC}"
+    echo -e "${YELLOW}  https://${DOMAIN}${NC}"
+else
+    echo -e "${BLUE}Your LoopWeb is now running at:${NC}"
+    echo -e "${YELLOW}  http://${IP}:5000${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}Default Login:${NC}"
+echo -e "  Username: ${YELLOW}admin${NC}"
+echo -e "  Password: ${YELLOW}admin${NC}"
+echo ""
+echo -e "${RED}IMPORTANT: Change your password after first login!${NC}"
+echo ""
+echo -e "${BLUE}Useful Commands:${NC}"
+echo -e "  Check status:  ${YELLOW}systemctl status loopweb${NC}"
+echo -e "  View logs:     ${YELLOW}journalctl -u loopweb -f${NC}"
+echo -e "  Restart:       ${YELLOW}systemctl restart loopweb${NC}"
+echo -e "  Stop:          ${YELLOW}systemctl stop loopweb${NC}"
+echo ""
+echo -e "${BLUE}Next Steps:${NC}"
+echo "  1. Login with admin/admin"
+echo "  2. Change password in Settings"
+echo "  3. Upload client_secrets.json from Google Cloud Console"
+echo "  4. Connect your YouTube channel"
+echo ""
+
+# Cleanup installer
 rm -f "$(realpath "$0")"
