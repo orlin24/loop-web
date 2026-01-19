@@ -69,8 +69,10 @@ def auth():
         client_secrets, scopes=scopes)
     
     # Needs to match the redirect URI registered in console
-    # Assuming localhost:5000 is used
-    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True)
+    # Force HTTPS when running behind Nginx/Proxy
+    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True, _scheme='https')
+    
+    print(f"DEBUG: Generated Redirect URI: {flow.redirect_uri}") # Debugging
     
     authorization_url, state = flow.authorization_url(
         access_type='offline',
@@ -88,7 +90,8 @@ def oauth2callback():
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         client_secrets, scopes=scopes, state=state)
         
-    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True)
+    flow.redirect_uri = url_for('loopbot.oauth2callback', _external=True, _scheme='https')
+    print(f"DEBUG: Callback Redirect URI: {flow.redirect_uri}") # Debugging
     
     authorization_response = request.url
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
