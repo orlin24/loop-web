@@ -27,7 +27,7 @@ def index():
     # Pass status and logs
     return render_template('loopbot.html', 
                            is_running=loop_bot.is_running,
-                           logs=loop_bot.logs[-20:] if loop_bot.logs else [],
+                           logs=list(loop_bot.logs)[-20:] if loop_bot.logs else [],
                            channel_name=loop_bot.channel_name,
                            channel_thumbnail=loop_bot.channel_thumbnail,
                            channel_subscribers=loop_bot.channel_subscribers,
@@ -45,7 +45,7 @@ def stop_loop():
 
 @loopbot_bp.route('/loopbot/logs')
 def get_logs():
-    return jsonify({'logs': loop_bot.logs[-50:]})
+    return jsonify({'logs': list(loop_bot.logs)[-50:]})
 
 @loopbot_bp.route('/loopbot/status')
 def get_status():
@@ -54,6 +54,7 @@ def get_status():
         'channel_name': loop_bot.channel_name,
         'channel_thumbnail': loop_bot.channel_thumbnail,
         'channel_subscribers': loop_bot.channel_subscribers,
+        'channel_id': loop_bot.channel_id,
         'broadcast_count': len(loop_bot.running_streams),
         'authenticated': loop_bot.youtube_service is not None
     })
@@ -62,22 +63,39 @@ def get_status():
 def auth():
     client_secrets = loop_bot.get_client_secrets_path()
     if not os.path.exists(client_secrets):
-        return "client_secrets.json not found in LoopBot folder", 404
-        
+        return """
+        <html>
+        <head><title>OAuth Not Configured</title></head>
+        <body style="font-family: Arial; padding: 40px; text-align: center;">
+            <h2>YouTube OAuth Not Configured</h2>
+            <p>Please configure your YouTube Client ID & Secret first.</p>
+            <p>Go to <a href="/loopbot/channels">Channel Settings</a> and enter your OAuth credentials.</p>
+            <br>
+            <a href="/loopbot/channels" style="padding: 10px 20px; background: #4285f4; color: white; text-decoration: none; border-radius: 5px;">
+                Configure OAuth
+            </a>
+        </body>
+        </html>
+        """, 404
+
+    # Read redirect_uri from config if available
+    try:
+        with open(client_secrets, 'r') as f:
+            config = json.load(f)
+            redirect_uri = config.get('web', {}).get('redirect_uris', ['https://loopbotiq.com/loopbot/oauth2callback'])[0]
+    except:
+        redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
+
     scopes = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.force-ssl']
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         client_secrets, scopes=scopes)
-    
-    # Force exact match with Google Cloud Console
-    # This solves issues where Nginx might pass 'www' or 'http' unexpectedly
-    flow.redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
-    
-    print(f"DEBUG: Using Hardcoded Redirect URI: {flow.redirect_uri}") # Debugging
-    
+
+    flow.redirect_uri = redirect_uri
+
     authorization_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true')
-    
+
     session['state'] = state
     return redirect(authorization_url)
 
@@ -86,16 +104,23 @@ def oauth2callback():
     state = session.get('state')
     if not state:
         return "Session state missing (cookie lost?). Try clearing browser cookies.", 400
-    
+
     client_secrets = loop_bot.get_client_secrets_path()
+
+    # Read redirect_uri from config (must match auth())
+    try:
+        with open(client_secrets, 'r') as f:
+            config = json.load(f)
+            redirect_uri = config.get('web', {}).get('redirect_uris', ['https://loopbotiq.com/loopbot/oauth2callback'])[0]
+    except:
+        redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
+
     scopes = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.force-ssl']
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
         client_secrets, scopes=scopes, state=state)
-        
-    # MUST match exactly what was sent in auth()
-    flow.redirect_uri = "https://loopbotiq.com/loopbot/oauth2callback"
-    print(f"DEBUG: Callback Redirect URI: {flow.redirect_uri}") # Debugging
-    
+
+    flow.redirect_uri = redirect_uri
+
     authorization_response = request.url
     # Fix for http vs https in callback URL if Nginx didn't rewrite it perfectly
     if authorization_response.startswith('http:'):
@@ -223,19 +248,21 @@ def delete_channel(id):
         channels_file = os.path.join(loop_bot.base_dir, 'channels.json')
         if not os.path.exists(channels_file):
             return jsonify({'success': False, 'message': 'No channels file'})
-            
+
         with open(channels_file, 'r') as f:
             channels = json.load(f)
-            
+
         target = next((c for c in channels if c['id'] == id), None)
         if not target:
              return jsonify({'success': False, 'message': 'Channel not found'})
-             
+
+        # Get token path for this channel
+        token_path = os.path.join(loop_bot.base_dir, 'tokens', target.get('token_file', ''))
+
         # Check if this was the active channel
-        # We compare the content of the token files to be sure
         is_active_channel = False
         active_token_path = loop_bot.get_token_path()
-        
+
         if os.path.exists(active_token_path) and os.path.exists(token_path):
             try:
                 with open(active_token_path, 'rb') as f1, open(token_path, 'rb') as f2:
@@ -243,15 +270,15 @@ def delete_channel(id):
                         is_active_channel = True
             except:
                 pass # If read error, fallback to name check
-                
+
         if not is_active_channel and loop_bot.channel_name == target['title']:
             is_active_channel = True
 
         # Remove token file
         if os.path.exists(token_path):
             os.remove(token_path)
-            
-        # Update JSON
+
+        # Update JSON - remove channel from list
         channels = [c for c in channels if c['id'] != id]
         with open(channels_file, 'w') as f:
             json.dump(channels, f, indent=2)
@@ -260,17 +287,21 @@ def delete_channel(id):
         if is_active_channel or len(channels) == 0:
             if os.path.exists(active_token_path):
                 os.remove(active_token_path)
-            
+
             # Reset LoopBot state
             loop_bot.youtube_service = None
-            loop_bot.channel_name = None
-            loop_bot.channel_thumbnail = None
-            loop_bot.channel_subscribers = "N/A"
-            loop_bot.start_loop() # This effectively stops/resets if service is None? 
-            # Actually stop_loop() is better to ensure threads stop
-            loop_bot.stop_loop()
-            
-        return jsonify({'success': True})
+            loop_bot.credentials = None
+            loop_bot.channel_name = "Unknown"
+            loop_bot.channel_thumbnail = ""
+            loop_bot.channel_subscribers = "0"
+            loop_bot.channel_id = None
+            loop_bot.content_items = []  # Clear content when logged out
+
+            # Stop loop if running
+            if loop_bot.is_running:
+                loop_bot.stop_loop()
+
+        return jsonify({'success': True, 'message': f'Channel {target["title"]} deleted'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
@@ -300,6 +331,85 @@ def switch_channel(id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+@loopbot_bp.route('/loopbot/oauth-config', methods=['GET'])
+def get_oauth_config():
+    """Get current OAuth configuration (Client ID & Secret)"""
+    try:
+        client_secrets_path = loop_bot.get_client_secrets_path()
+        config = {
+            'client_id': '',
+            'client_secret': '',
+            'redirect_uri': 'https://loopbotiq.com/loopbot/oauth2callback',
+            'configured': False
+        }
+
+        if os.path.exists(client_secrets_path):
+            with open(client_secrets_path, 'r') as f:
+                data = json.load(f)
+                web = data.get('web', {})
+                config['client_id'] = web.get('client_id', '')
+                config['client_secret'] = web.get('client_secret', '')
+                config['redirect_uri'] = web.get('redirect_uris', [config['redirect_uri']])[0]
+                config['configured'] = bool(config['client_id'] and config['client_secret'])
+
+        return jsonify({'success': True, 'config': config})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
+@loopbot_bp.route('/loopbot/oauth-config', methods=['POST'])
+def save_oauth_config():
+    """Save OAuth configuration (Client ID & Secret) - creates client_secrets.json"""
+    try:
+        data = request.json
+        client_id = data.get('client_id', '').strip()
+        client_secret = data.get('client_secret', '').strip()
+        redirect_uri = data.get('redirect_uri', 'https://loopbotiq.com/loopbot/oauth2callback').strip()
+
+        if not client_id or not client_secret:
+            return jsonify({'success': False, 'message': 'Client ID and Client Secret are required'}), 400
+
+        # Create client_secrets.json in Google's expected format
+        client_secrets = {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "redirect_uris": [redirect_uri],
+                "javascript_origins": [redirect_uri.rsplit('/', 1)[0]]  # Extract base URL
+            }
+        }
+
+        # Ensure LoopBot directory exists
+        if not os.path.exists(loop_bot.base_dir):
+            os.makedirs(loop_bot.base_dir)
+
+        client_secrets_path = loop_bot.get_client_secrets_path()
+        with open(client_secrets_path, 'w') as f:
+            json.dump(client_secrets, f, indent=2)
+
+        return jsonify({
+            'success': True,
+            'message': 'OAuth configuration saved successfully',
+            'path': client_secrets_path
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
+@loopbot_bp.route('/loopbot/oauth-config', methods=['DELETE'])
+def delete_oauth_config():
+    """Delete OAuth configuration"""
+    try:
+        client_secrets_path = loop_bot.get_client_secrets_path()
+        if os.path.exists(client_secrets_path):
+            os.remove(client_secrets_path)
+            return jsonify({'success': True, 'message': 'OAuth configuration deleted'})
+        else:
+            return jsonify({'success': False, 'message': 'No OAuth configuration found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
 
 @loopbot_bp.route('/loopbot/settings', methods=['GET'])
 def get_settings():

@@ -11,12 +11,18 @@ import threading
 import gdown
 import platform
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 import locale
 import shlex
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import psutil
 from bs4 import BeautifulSoup
+import atexit
+import fcntl
+import weakref
 
 # Matikan log HTTP bawaan Flask
 log = logging.getLogger('werkzeug')
@@ -34,8 +40,31 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 from loopbot_bp import loopbot_bp
 app.register_blueprint(loopbot_bp)
 
-# Konfigurasi logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Konfigurasi logging dengan rotation (max 10MB, keep 5 backups)
+LOG_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+log_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, 'app.log'),
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[log_handler])
+
+# Global HTTP session dengan connection pooling dan retry
+http_session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504]
+)
+adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+http_session.mount("http://", adapter)
+http_session.mount("https://", adapter)
+
+# Timer tracking untuk cleanup
+active_timers = weakref.WeakSet()
+shutdown_event = threading.Event()
 
 # Gunakan lock untuk menghindari race condition saat menghapus proses dari dictionary
 process_lock = threading.Lock()
@@ -65,24 +94,51 @@ try:
 except:
     has_nvidia_gpu = False
 
+# File locking helper functions untuk mencegah race conditions
+def read_json_safe(file_path, default=None):
+    """Thread-safe JSON read dengan file locking."""
+    if default is None:
+        default = {}
+    if not os.path.exists(file_path):
+        return default
+    try:
+        with open(file_path, 'r') as file:
+            fcntl.flock(file.fileno(), fcntl.LOCK_SH)  # Shared lock untuk read
+            try:
+                return json.load(file)
+            finally:
+                fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+    except (json.JSONDecodeError, IOError) as e:
+        logging.error(f"Error reading {file_path}: {e}")
+        return default
+
+def write_json_safe(file_path, data):
+    """Thread-safe JSON write dengan file locking."""
+    try:
+        # Write to temp file first, then rename (atomic operation)
+        temp_path = file_path + '.tmp'
+        with open(temp_path, 'w') as file:
+            fcntl.flock(file.fileno(), fcntl.LOCK_EX)  # Exclusive lock untuk write
+            try:
+                json.dump(data, file, indent=2)
+            finally:
+                fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+        os.replace(temp_path, file_path)  # Atomic rename
+    except IOError as e:
+        logging.error(f"Error writing {file_path}: {e}")
+
 # Definisikan fungsi load_apibot_settings dan save_apibot_settings di sini
 def load_apibot_settings():
     """Memuat pengaturan bot dari file apibot.json."""
-    if os.path.exists(apibot_json_path):
-        with open(apibot_json_path, 'r') as file:
-            return json.load(file)
-    return {}
+    return read_json_safe(apibot_json_path, {})
 
-def save_apibot_settings(bot_token, chat_id, client_id=None, client_secret=None):
+def save_apibot_settings(bot_token, chat_id):
     """Menyimpan pengaturan bot ke file apibot.json."""
     settings = {
         'botToken': bot_token,
-        'chatId': chat_id,
-        'clientId': client_id,
-        'clientSecret': client_secret
+        'chatId': chat_id
     }
-    with open(apibot_json_path, 'w') as file:
-        json.dump(settings, file)
+    write_json_safe(apibot_json_path, settings)
 
 # Baru setelah ini panggil load_apibot_settings()
 telegram_bot_settings = load_apibot_settings()
@@ -146,66 +202,47 @@ def logout():
     return redirect(url_for('login'))
 
 def load_uploaded_videos():
-    if os.path.exists(videos_json_path):
-        with open(videos_json_path, 'r') as file:
-            return json.load(file)
-    return []
+    return read_json_safe(videos_json_path, [])
 
 def save_uploaded_videos():
-    with open(videos_json_path, 'w') as file:
-        json.dump(uploaded_videos, file)
+    write_json_safe(videos_json_path, uploaded_videos)
 
 def load_live_info():
-    if os.path.exists(live_info_json_path):
-        with open(live_info_json_path, 'r') as file:
-            return json.load(file)
-    return {}
-        
+    return read_json_safe(live_info_json_path, {})
+
 # Load data saat startup
 def load_data():
     global uploaded_videos, live_info
-    if os.path.exists(videos_json_path):
-        with open(videos_json_path, 'r') as file:
-            uploaded_videos = json.load(file)
-    if os.path.exists(live_info_json_path):
-        with open(live_info_json_path, 'r') as file:
-            live_info = json.load(file)
+    uploaded_videos = load_uploaded_videos()
+    live_info = load_live_info()
 
 # Panggil load_data saat startup
 load_data()
 
 def restart_if_needed():
-    while True:
+    while not shutdown_event.is_set():
         with process_lock:
             live_ids = list(processes.keys())  # Create a copy to avoid modification during iteration
             for live_id in live_ids:
+                if shutdown_event.is_set():
+                    break
                 process = processes.get(live_id)
                 if process and process.poll() is not None:  # Proses sudah mati
                     if live_id in live_info and live_info[live_id]['status'] == 'Active':
-                        # Tambahkan logging untuk diagnostik
-                        logging.debug(f"Stream {live_id} mati, melakukan restart...")
-                        
-                        # Hapus proses lama
+                        logging.info(f"Stream {live_id} mati, melakukan restart...")
                         del processes[live_id]
-                        
-                        # Jalankan dengan prioritas yang lebih rendah
                         modified_info = live_info[live_id].copy()
-                        
-                        # Jalankan dengan nice untuk mengurangi beban CPU
-                        threading.Thread(target=run_ffmpeg_with_nice, args=[live_id, modified_info]).start()
-                
+                        threading.Thread(target=run_ffmpeg_with_nice, args=[live_id, modified_info], daemon=True).start()
+
                 elif live_id in live_info and live_info[live_id]['status'] == 'Active' and live_id not in processes:
-                    # Kasus di mana proses hilang dari dictionary
-                    logging.debug(f"Tidak ada proses untuk live_id: {live_id}, restart otomatis.")
-                    
-                    threading.Thread(target=run_ffmpeg_with_nice, args=[live_id, live_info[live_id]]).start()
-        
-        # Cek setiap 10 detik untuk memastikan restart cepat
-        time.sleep(10)
+                    logging.info(f"Tidak ada proses untuk live_id: {live_id}, restart otomatis.")
+                    threading.Thread(target=run_ffmpeg_with_nice, args=[live_id, live_info[live_id]], daemon=True).start()
+
+        # Cek setiap 10 detik, tapi bisa interrupted oleh shutdown_event
+        shutdown_event.wait(10)
 
 def save_live_info():
-    with open(live_info_json_path, 'w') as file:
-        json.dump(live_info, file)
+    write_json_safe(live_info_json_path, live_info)
 
 # Inisialisasi variabel setelah load_data()
 uploaded_videos = load_uploaded_videos()
@@ -299,7 +336,9 @@ def run_ffmpeg_with_nice(live_id, info):
             stop_time = datetime.now() + timedelta(minutes=duration)
             delay = (stop_time - datetime.now()).total_seconds()
             if delay > 5:
-                threading.Timer(delay, stop_stream_manually, args=[live_id, True, True]).start()
+                timer = threading.Timer(delay, stop_stream_manually, args=[live_id, True, True])
+                active_timers.add(timer)
+                timer.start()
                 send_telegram_notification(f"⏳ Live '{info['title']}' akan berhenti otomatis dalam {duration} menit.")
         
         # Untuk stream jangka panjang, tambahkan log bahwa stream telah dimulai
@@ -311,8 +350,16 @@ def run_ffmpeg_with_nice(live_id, info):
         live_info[live_id]['start_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_live_info()
         
-        # Tunggu proses selesai (ini akan memblokir sampai proses berakhir)
-        process.wait()
+        # Tunggu proses selesai dengan timeout untuk mencegah blocking forever
+        try:
+            process.wait(timeout=86400)  # Max 24 jam timeout
+        except subprocess.TimeoutExpired:
+            logging.warning(f"Process {live_id} exceeded 24h timeout, terminating...")
+            try:
+                process.terminate()
+                process.wait(timeout=10)
+            except:
+                process.kill()
         
     except Exception as e:
         logging.error(f"FFmpeg error in run_ffmpeg_with_nice: {str(e)}")
@@ -405,7 +452,9 @@ def update_start_schedule(id):
             delay = max(0, (schedule_time - datetime.now()).total_seconds())
             
             if delay > 0:
-                threading.Timer(delay, run_ffmpeg, args=[id, live_info[id]]).start()
+                timer = threading.Timer(delay, run_ffmpeg, args=[id, live_info[id]])
+                active_timers.add(timer)
+                timer.start()
                 send_telegram_notification(f"✅ Live '{live_info[id]['title']}' dijadwalkan untuk mulai pada {formatted_time}.")
                 return jsonify({'message': f'Jadwal mulai diperbarui! Stream akan dimulai pada {formatted_time}'})
             else:
@@ -437,7 +486,9 @@ def update_stop_schedule(id):
             stop_time = datetime.now() + timedelta(minutes=duration)
             delay = (stop_time - datetime.now()).total_seconds()
             if delay > 5:
-                threading.Timer(delay, stop_stream_manually, args=[id, True, True]).start()
+                timer = threading.Timer(delay, stop_stream_manually, args=[id, True, True])
+                active_timers.add(timer)
+                timer.start()
                 send_telegram_notification(f"⏳ Live '{live_info[id]['title']}' diperbarui, akan berhenti dalam {duration} menit.")
 
         return jsonify({'message': 'Jadwal stop otomatis diperbarui!'})
@@ -451,61 +502,67 @@ def stop_all_active_streams():
             stop_stream_manually(live_id, force=True)
 
 def periodic_check():
+    if shutdown_event.is_set():
+        return
     check_and_update_scheduled_streams()
-    threading.Timer(60, periodic_check).start()
+    if not shutdown_event.is_set():
+        timer = threading.Timer(60, periodic_check)
+        active_timers.add(timer)
+        timer.start()
 
 def monitor_stream_health():
-    while True:
-        restart_counts = {}
+    while not shutdown_event.is_set():
         current_time = datetime.now()
-        
-        for live_id, info in live_info.items():
+
+        for live_id, info in list(live_info.items()):
+            if shutdown_event.is_set():
+                break
             if info['status'] == 'Active' and 'start_time' in info:
                 try:
-                    # Periksa jika stream sudah berjalan lebih dari 24 jam
                     start_time = datetime.strptime(info['start_time'], "%Y-%m-%d %H:%M:%S")
                     uptime_hours = (current_time - start_time).total_seconds() / 3600
-                    
+
                     # Kirim notifikasi setiap 24 jam untuk stream jangka panjang
                     if uptime_hours > 24 and uptime_hours % 24 < 1:
                         send_telegram_notification(f"🕒 Live '{info['title']}' telah berjalan selama {int(uptime_hours)} jam")
                 except Exception as e:
                     logging.error(f"Error calculating uptime: {str(e)}")
-        
-        # Cek setiap 15 menit
-        time.sleep(900)
+
+        # Cek setiap 15 menit, bisa interrupted oleh shutdown
+        shutdown_event.wait(900)
 
 def monitor_resource_usage():
-    while True:
+    last_warning_time = 0
+    WARNING_COOLDOWN = 300  # 5 menit cooldown antara warning
+
+    while not shutdown_event.is_set():
         try:
-            # Cek setiap 30 detik
-            time.sleep(30)
-            
+            # Cek setiap 30 detik, bisa interrupted oleh shutdown
+            if shutdown_event.wait(30):
+                break
+
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
             memory_percent = memory.percent
-            
-            # Log resource usage untuk monitoring
-            logging.debug(f"Resource usage: CPU {cpu_percent}%, Memory {memory_percent}%")
-            
-            # Peringatan jika resource usage tinggi
-            if cpu_percent > 90 or memory_percent > 90:
+
+            current_time = time.time()
+
+            # Peringatan jika resource usage tinggi (dengan cooldown)
+            if (cpu_percent > 85 or memory_percent > 85) and (current_time - last_warning_time > WARNING_COOLDOWN):
                 message = f"⚠️ Peringatan: Penggunaan resource tinggi - CPU: {cpu_percent}%, Memory: {memory_percent}%"
                 logging.warning(message)
                 send_telegram_notification(message)
-                
-                # Jika memory sangat tinggi, hentikan stream yang paling tidak penting
-                if memory_percent > 95:
-                    # Cari stream dengan prioritas terendah
-                    active_streams = [(id, info) for id, info in live_info.items() 
+                last_warning_time = current_time
+
+                # Jika memory sangat tinggi (>92%), hentikan stream prioritas terendah
+                if memory_percent > 92:
+                    active_streams = [(id, info) for id, info in list(live_info.items())
                                      if info['status'] == 'Active']
-                    
+
                     if active_streams:
-                        # Urutkan berdasarkan prioritas (jika ada) atau restart_count
-                        sorted_streams = sorted(active_streams, 
+                        sorted_streams = sorted(active_streams,
                                               key=lambda x: x[1].get('priority', 0) or x[1].get('restart_count', 0))
-                        
-                        # Hentikan stream dengan prioritas terendah
+
                         if sorted_streams:
                             low_priority_id = sorted_streams[0][0]
                             stop_stream_manually(low_priority_id, force=True)
@@ -522,7 +579,7 @@ def format_size(size):
 
 def get_file_name_from_google_drive_url(url):
     try:
-        response = requests.get(url)
+        response = http_session.get(url, timeout=30)
         soup = BeautifulSoup(response.text, 'html.parser')
         title = soup.title.string
         if title and "Google Drive" in title:
@@ -592,7 +649,9 @@ def start_stream():
         if schedule_date:
             schedule_time = datetime.strptime(schedule_date, "%Y-%m-%dT%H:%M")
             delay = max(0, (schedule_time - datetime.now()).total_seconds())
-            threading.Timer(delay, run_ffmpeg, args=[live_id, live_info[live_id]]).start()
+            timer = threading.Timer(delay, run_ffmpeg, args=[live_id, live_info[live_id]])
+            active_timers.add(timer)
+            timer.start()
             send_telegram_notification(f"✅ Live terjadwal '{title}' akan dimulai pada {schedule_date}.")
         else:
             threading.Thread(target=run_ffmpeg, args=[live_id, live_info[live_id]]).start()
@@ -929,7 +988,7 @@ def send_telegram_notification(message):
         url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
         payload = {"chat_id": telegram_chat_id, "text": message}
         try:
-            response = requests.post(url, json=payload)
+            response = http_session.post(url, json=payload, timeout=15)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             logging.error(f"Failed to send Telegram notification: {e}")
@@ -1007,48 +1066,65 @@ def set_telegram_bot():
     data = request.json
     bot_token = data.get('botToken')
     chat_id = data.get('chatId')
-    client_id = data.get('clientId')
-    client_secret = data.get('clientSecret')
-    
+
     if not bot_token or not chat_id:
         return jsonify({'message': 'Bot token and chat ID are required!'}), 400
 
-    save_apibot_settings(bot_token, chat_id, client_id, client_secret)
-    
+    save_apibot_settings(bot_token, chat_id)
+
     # Perbarui variabel global setelah menyimpan
     global telegram_bot_token, telegram_chat_id
     telegram_bot_token = bot_token
     telegram_chat_id = chat_id
-    
-    # Update LoopBot behavior if needed (optional)
-    # save_client_secrets_json(client_id, client_secret) if you want to write to file
-    if client_id and client_secret:
-        client_secrets_content = {
-            "web": {
-                "client_id": client_id,
-                "project_id": "loopbot-project",
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_secret": client_secret,
-                "redirect_uris": [f"{request.scheme}://{request.host}/loopbot/oauth2callback"]
-            }
-        }
-        # Save to LoopBot directory for authentication to work
-        with open(os.path.join(BASE_DIR, 'LoopBot', 'client_secrets.json'), 'w') as f:
-            json.dump(client_secrets_content, f, indent=4)
-    
+
     return jsonify({'message': 'Settings saved successfully!'})
 
 @app.route('/telegram_bot')
 @login_required
 def telegram_bot():
     settings = load_apibot_settings()
-    return render_template('telegrambot.html', 
-                         botToken=settings.get('botToken', ''), 
-                         chatId=settings.get('chatId', ''),
-                         clientId=settings.get('clientId', ''),
-                         clientSecret=settings.get('clientSecret', ''))
+    return render_template('telegrambot.html',
+                         botToken=settings.get('botToken', ''),
+                         chatId=settings.get('chatId', ''))
+
+# Graceful shutdown handler
+def graceful_shutdown(signum=None, frame=None):
+    """Clean shutdown: stop all timers, processes, and threads."""
+    logging.info("Initiating graceful shutdown...")
+    shutdown_event.set()
+
+    # Cancel all active timers
+    for timer in list(active_timers):
+        try:
+            timer.cancel()
+        except:
+            pass
+
+    # Stop all FFmpeg processes
+    with process_lock:
+        for live_id, process in list(processes.items()):
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+            except Exception as e:
+                logging.error(f"Error stopping process {live_id}: {e}")
+
+    # Close HTTP session
+    try:
+        http_session.close()
+    except:
+        pass
+
+    logging.info("Graceful shutdown complete")
+
+# Register shutdown handlers
+signal.signal(signal.SIGTERM, graceful_shutdown)
+signal.signal(signal.SIGINT, graceful_shutdown)
+atexit.register(graceful_shutdown)
 
 # Pastikan semua streaming aktif ditandai sebagai stopped saat startup
 stop_all_active_streams()
@@ -1057,13 +1133,13 @@ stop_all_active_streams()
 periodic_check()
 
 # Jalankan monitoring untuk restart otomatis
-threading.Thread(target=restart_if_needed, daemon=True).start()
+threading.Thread(target=restart_if_needed, daemon=True, name="restart_monitor").start()
 
 # Jalankan monitoring kesehatan stream
-threading.Thread(target=monitor_stream_health, daemon=True).start()
+threading.Thread(target=monitor_stream_health, daemon=True, name="health_monitor").start()
 
 # Jalankan monitoring resource
-threading.Thread(target=monitor_resource_usage, daemon=True).start()
+threading.Thread(target=monitor_resource_usage, daemon=True, name="resource_monitor").start()
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)

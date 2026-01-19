@@ -10,8 +10,12 @@ import platform
 import uuid
 import hashlib
 from datetime import datetime, timedelta
+from collections import deque
 import re
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import fcntl
 
 # Google API imports
 try:
@@ -35,16 +39,25 @@ class LoopBotCore:
         self.base_dir = base_dir
         self.is_running = False
         self.is_streaming = False
-        self.logs = []
+        self.logs = deque(maxlen=500)  # Otomatis buang log lama, lebih efisien dari list
         self.running_streams = []
         self.youtube_service = None
         self.credentials = None
         self.channel_name = "Unknown"
         self.channel_thumbnail = ""
         self.channel_subscribers = "0"
+        self.channel_id = None  # Track active channel ID for per-user content
         self.last_api_call = 0
         self.api_call_delay = 2
         self.api_lock = threading.Lock()
+        self.shutdown_event = threading.Event()
+
+        # HTTP session dengan connection pooling
+        self.http_session = requests.Session()
+        retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=5, pool_maxsize=10)
+        self.http_session.mount("http://", adapter)
+        self.http_session.mount("https://", adapter)
         
         # Load content
         self.titles = []
@@ -86,9 +99,7 @@ class LoopBotCore:
     def log_message(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
-        self.logs.append(log_entry)
-        if len(self.logs) > 500:
-            self.logs.pop(0)
+        self.logs.append(log_entry)  # deque otomatis buang yang lama
         logging.info(message)
 
     def load_data(self):
@@ -119,29 +130,62 @@ class LoopBotCore:
             self.log_message(f"Error loading data: {str(e)}")
 
     def get_content_path(self):
-        return os.path.join(self.base_dir, 'content.json')
+        """Get content file path - per channel if logged in, otherwise global"""
+        if self.channel_id:
+            # Per-channel content file
+            content_dir = os.path.join(self.base_dir, 'content')
+            if not os.path.exists(content_dir):
+                os.makedirs(content_dir)
+            return os.path.join(content_dir, f'content_{self.channel_id}.json')
+        else:
+            # No channel logged in - return None to indicate no content should load
+            return None
 
     def load_content(self):
-        """Load content items from JSON file"""
+        """Load content items from JSON file with file locking - per channel"""
         try:
             content_path = self.get_content_path()
+
+            # If no channel is logged in, content is empty
+            if content_path is None:
+                self.content_items = []
+                # Silent - don't log during startup
+                return
+
             if os.path.exists(content_path):
                 with open(content_path, 'r', encoding='utf-8') as f:
-                    self.content_items = json.load(f)
-                self.log_message(f"Loaded {len(self.content_items)} content items")
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        self.content_items = json.load(f)
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                self.log_message(f"Loaded {len(self.content_items)} content items for channel {self.channel_id}")
             else:
                 self.content_items = []
+                self.log_message(f"No content file found for channel {self.channel_id} - starting fresh")
         except Exception as e:
             self.log_message(f"Error loading content: {str(e)}")
             self.content_items = []
 
     def save_content(self):
-        """Save content items to JSON file"""
+        """Save content items to JSON file with file locking (atomic write) - per channel"""
         try:
             content_path = self.get_content_path()
-            with open(content_path, 'w', encoding='utf-8') as f:
-                json.dump(self.content_items, f, indent=2, ensure_ascii=False)
-            self.log_message(f"Saved {len(self.content_items)} content items")
+
+            # If no channel is logged in, cannot save
+            if content_path is None:
+                self.log_message("Cannot save content - no channel logged in")
+                return
+
+            temp_path = content_path + '.tmp'
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    json.dump(self.content_items, f, indent=2, ensure_ascii=False)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            os.replace(temp_path, content_path)  # Atomic rename
+            self.log_message(f"Saved {len(self.content_items)} content items for channel {self.channel_id}")
         except Exception as e:
             self.log_message(f"Error saving content: {str(e)}")
 
@@ -176,26 +220,35 @@ class LoopBotCore:
                 # Disable SSL check if needed
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                
+
                 # Manual http obj construction with auth
                 http = httplib2.Http(disable_ssl_certificate_validation=True)
                 http_auth = google_auth_httplib2.AuthorizedHttp(self.credentials, http=http)
-                
+
                 with self.api_lock:
                     self.youtube_service = build('youtube', 'v3', http=http_auth)
-                    
+
                     # Get channel info
                     request = self.youtube_service.channels().list(part="snippet,statistics", mine=True)
                     response = request.execute()
-                
+
                 if response.get('items'):
                     channel = response['items'][0]
+                    old_channel_id = self.channel_id
+                    self.channel_id = channel['id']  # Set channel ID
                     self.channel_name = channel['snippet']['title']
                     self.channel_thumbnail = channel['snippet']['thumbnails']['default']['url']
                     self.channel_subscribers = channel['statistics']['subscriberCount']
+
+                    # Reload content for this channel if channel changed
+                    if old_channel_id != self.channel_id:
+                        self.load_content()
+                        self.log_message(f"Switched to channel: {self.channel_name} ({self.channel_id})")
                 else:
+                    self.channel_id = None
                     self.channel_thumbnail = ""
                     self.channel_subscribers = "N/A"
+                    self.content_items = []  # Clear content when no channel
              except Exception as e:
                  self.log_message(f"Service creation failed: {e}")
 
@@ -216,14 +269,15 @@ class LoopBotCore:
     def stop_loop(self):
         self.is_running = False
         self.is_streaming = False
+        self.shutdown_event.set()
         self.log_message("LoopBot automation stopping...")
 
     def _stats_monitor_loop(self):
         """Background thread to update viewers count for all running streams"""
-        while self.is_running:
+        while self.is_running and not self.shutdown_event.is_set():
             try:
-                for stream in self.running_streams:
-                    if not self.is_running:
+                for stream in list(self.running_streams):
+                    if not self.is_running or self.shutdown_event.is_set():
                         break
                     broadcast_id = stream.get('broadcast_id')
                     current_status = stream.get('status', '').lower()
@@ -236,13 +290,16 @@ class LoopBotCore:
                         except Exception as e:
                             self.log_message(f"Stats error for {broadcast_id[:8]}: {e}")
                         # Delay between each stream to avoid rate limiting
-                        time.sleep(2)
+                        if self.shutdown_event.wait(2):
+                            break
 
-                # Update every 60 seconds to reduce API calls
-                time.sleep(60)
+                # Update every 60 seconds, bisa interrupted
+                if self.shutdown_event.wait(60):
+                    break
             except Exception as e:
                 self.log_message(f"Stats monitor error: {e}")
-                time.sleep(60)
+                if self.shutdown_event.wait(60):
+                    break
 
     def get_live_broadcast_stats(self, broadcast_id):
         """Get live broadcast statistics (viewers) from YouTube API"""
@@ -776,7 +833,7 @@ class LoopBotCore:
                     "text": message,
                     "parse_mode": "HTML"
                 }
-                response = requests.post(url, json=payload, timeout=10)
+                response = self.http_session.post(url, json=payload, timeout=15)
                 if response.status_code == 200:
                     self.log_message("Telegram notification sent")
                 else:

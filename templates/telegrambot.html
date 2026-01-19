@@ -31,7 +31,7 @@
                         </div>
 
                         <!-- Chat ID Input -->
-                        <div class="form-group mb-3">
+                        <div class="form-group mb-4">
                             <label for="chatId" class="font-weight-bold form-label">
                                 <i class="fas fa-comment me-2"></i> Chat ID
                             </label>
@@ -45,35 +45,6 @@
                             <small class="form-text text-muted">
                                 Masukkan ID chat Telegram Anda.
                             </small>
-                        </div>
-
-                        <!-- YouTube Client ID Input -->
-                        <div class="form-group mb-3">
-                            <label for="clientId" class="font-weight-bold form-label">
-                                <i class="fab fa-google me-2"></i> YouTube Client ID
-                            </label>
-                            <div class="input-group">
-                                <input type="password" class="form-control bg-dark text-white" id="clientId"
-                                    name="clientId" value="{{ clientId }}" placeholder="Masukkan YouTube Client ID">
-                                <button class="btn btn-outline-secondary" type="button" id="toggleClientId">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- YouTube Client Secret Input -->
-                        <div class="form-group mb-4">
-                            <label for="clientSecret" class="font-weight-bold form-label">
-                                <i class="fas fa-key me-2"></i> YouTube Client Secret
-                            </label>
-                            <div class="input-group">
-                                <input type="password" class="form-control bg-dark text-white" id="clientSecret"
-                                    name="clientSecret" value="{{ clientSecret }}"
-                                    placeholder="Masukkan YouTube Client Secret">
-                                <button class="btn btn-outline-secondary" type="button" id="toggleClientSecret">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                            </div>
                         </div>
 
                         <!-- Save Button -->
@@ -144,32 +115,6 @@
             }
         });
 
-        // Toggle visibility for Client ID
-        $('#toggleClientId').click(function () {
-            const input = $('#clientId');
-            const icon = $(this).find('i');
-            if (input.attr('type') === 'password') {
-                input.attr('type', 'text');
-                icon.removeClass('fa-eye').addClass('fa-eye-slash');
-            } else {
-                input.attr('type', 'password');
-                icon.removeClass('fa-eye-slash').addClass('fa-eye');
-            }
-        });
-
-        // Toggle visibility for Client Secret
-        $('#toggleClientSecret').click(function () {
-            const input = $('#clientSecret');
-            const icon = $(this).find('i');
-            if (input.attr('type') === 'password') {
-                input.attr('type', 'text');
-                icon.removeClass('fa-eye').addClass('fa-eye-slash');
-            } else {
-                input.attr('type', 'password');
-                icon.removeClass('fa-eye-slash').addClass('fa-eye');
-            }
-        });
-
         // Form submission
         $('#telegramBotForm').on('submit', function (e) {
             e.preventDefault();
@@ -179,9 +124,7 @@
                 contentType: 'application/json',
                 data: JSON.stringify({
                     botToken: $('#botToken').val(),
-                    chatId: $('#chatId').val(),
-                    clientId: $('#clientId').val(),
-                    clientSecret: $('#clientSecret').val()
+                    chatId: $('#chatId').val()
                 }),
                 success: function (response) {
                     alert('Settings saved successfully!');

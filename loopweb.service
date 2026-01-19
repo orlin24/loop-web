@@ -1,0 +1,38 @@
+[Unit]
+Description=LoopWeb Streaming Application
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/loopweb
+Environment="PATH=/opt/loopweb/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="FLASK_SECRET_KEY=your-secret-key-here"
+ExecStart=/opt/loopweb/venv/bin/python app.py
+Restart=always
+RestartSec=10
+
+# Resource limits untuk stabilitas jangka panjang
+MemoryMax=2G
+MemoryHigh=1.5G
+CPUQuota=150%
+
+# Logging
+StandardOutput=append:/var/log/loopweb/app.log
+StandardError=append:/var/log/loopweb/error.log
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/loopweb/uploads /opt/loopweb/logs /opt/loopweb/LoopBot
+
+# Graceful shutdown timeout
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

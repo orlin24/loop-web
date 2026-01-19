@@ -1,12 +1,63 @@
 {% extends "layout.html" %}
 {% block content %}
 <div class="row">
+    <!-- OAuth Configuration Section -->
+    <div class="col-12 mb-4">
+        <div class="card bg-dark border-secondary">
+            <div class="card-header bg-secondary bg-opacity-25 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-key text-warning me-2"></i> YouTube OAuth Configuration
+                </h5>
+                <span id="oauthStatus" class="badge bg-secondary">Checking...</span>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary small mb-3">
+                    Enter your Google Cloud OAuth credentials. Get them from
+                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-info">Google Cloud Console</a>.
+                </p>
+                <form id="oauthForm">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Client ID</label>
+                            <input type="text" class="form-control bg-dark text-light border-secondary"
+                                   id="clientId" placeholder="xxxx.apps.googleusercontent.com">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Client Secret</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control bg-dark text-light border-secondary"
+                                       id="clientSecret" placeholder="GOCSPX-xxxxx">
+                                <button type="button" class="btn btn-outline-secondary" onclick="toggleSecret()">
+                                    <i class="bi bi-eye" id="secretIcon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Redirect URI</label>
+                            <input type="text" class="form-control bg-dark text-light border-secondary"
+                                   id="redirectUri" placeholder="https://yourdomain.com/loopbot/oauth2callback">
+                            <small class="text-secondary">This must match the redirect URI in your Google Cloud Console.</small>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save me-1"></i> Save OAuth Config
+                            </button>
+                            <button type="button" class="btn btn-outline-danger ms-2" onclick="deleteOAuthConfig()">
+                                <i class="bi bi-trash me-1"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="col-12 mb-4 d-flex justify-content-between align-items-center">
         <h2>
             <i class="bi bi-youtube text-danger me-2"></i> YouTube Channels
         </h2>
-        <a href="/loopbot/auth?mode=add" class="btn btn-primary">
+        <a href="/loopbot/auth?mode=add" class="btn btn-primary" id="addChannelBtn">
             <i class="bi bi-plus-lg me-1"></i> Add Channel
         </a>
     </div>
@@ -70,9 +121,116 @@
 <script>
     let currentChannels = [];
     let deleteId = null;
+    let oauthConfigured = false;
 
-    document.addEventListener('DOMContentLoaded', loadChannels);
+    document.addEventListener('DOMContentLoaded', () => {
+        loadOAuthConfig();
+        loadChannels();
 
+        // OAuth form submit
+        document.getElementById('oauthForm').addEventListener('submit', saveOAuthConfig);
+    });
+
+    // ===== OAuth Configuration Functions =====
+    function loadOAuthConfig() {
+        fetch('/loopbot/oauth-config')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const config = data.config;
+                    document.getElementById('clientId').value = config.client_id || '';
+                    document.getElementById('clientSecret').value = config.client_secret || '';
+                    document.getElementById('redirectUri').value = config.redirect_uri || window.location.origin + '/loopbot/oauth2callback';
+
+                    oauthConfigured = config.configured;
+                    updateOAuthStatus(config.configured);
+                }
+            })
+            .catch(err => {
+                console.error('Failed to load OAuth config:', err);
+                // Set default redirect URI
+                document.getElementById('redirectUri').value = window.location.origin + '/loopbot/oauth2callback';
+            });
+    }
+
+    function updateOAuthStatus(configured) {
+        const statusBadge = document.getElementById('oauthStatus');
+        const addBtn = document.getElementById('addChannelBtn');
+
+        if (configured) {
+            statusBadge.className = 'badge bg-success';
+            statusBadge.innerHTML = '<i class="bi bi-check-circle me-1"></i> Configured';
+            addBtn.classList.remove('disabled');
+            addBtn.removeAttribute('title');
+        } else {
+            statusBadge.className = 'badge bg-warning text-dark';
+            statusBadge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Not Configured';
+            addBtn.classList.add('disabled');
+            addBtn.setAttribute('title', 'Configure OAuth first');
+        }
+    }
+
+    function saveOAuthConfig(e) {
+        e.preventDefault();
+
+        const clientId = document.getElementById('clientId').value.trim();
+        const clientSecret = document.getElementById('clientSecret').value.trim();
+        const redirectUri = document.getElementById('redirectUri').value.trim();
+
+        if (!clientId || !clientSecret) {
+            alert('Client ID and Client Secret are required');
+            return;
+        }
+
+        fetch('/loopbot/oauth-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('OAuth configuration saved!');
+                oauthConfigured = true;
+                updateOAuthStatus(true);
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(err => alert('Failed to save: ' + err.message));
+    }
+
+    function deleteOAuthConfig() {
+        if (!confirm('Delete OAuth configuration? You will need to reconfigure to add channels.')) return;
+
+        fetch('/loopbot/oauth-config', { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('clientId').value = '';
+                document.getElementById('clientSecret').value = '';
+                oauthConfigured = false;
+                updateOAuthStatus(false);
+                alert('OAuth configuration deleted');
+            } else {
+                alert('Error: ' + data.message);
+            }
+        });
+    }
+
+    function toggleSecret() {
+        const input = document.getElementById('clientSecret');
+        const icon = document.getElementById('secretIcon');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            input.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    }
+
+    // ===== Channel Functions =====
     function loadChannels() {
         fetch('/loopbot/channels/list')
             .then(r => r.json())
