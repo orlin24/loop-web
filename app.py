@@ -851,11 +851,32 @@ def live_list():
 def upload_video():
     if request.method == 'POST':
         try:
+            # Cek apakah request memiliki JSON data
+            if not request.is_json:
+                logging.error("Request is not JSON")
+                return jsonify({'success': False, 'message': 'Invalid request format'}), 400
+
             file_url = request.json.get('file_url')
             if not file_url:
                 return jsonify({'success': False, 'message': 'URL tidak boleh kosong'}), 400
 
             logging.info(f"Starting download from: {file_url}")
+
+            # Cek disk space sebelum download
+            try:
+                disk_stat = os.statvfs(uploads_dir)
+                free_space_gb = (disk_stat.f_bavail * disk_stat.f_frsize) / (1024**3)
+                logging.info(f"Free disk space: {free_space_gb:.2f} GB")
+                if free_space_gb < 1:  # Kurang dari 1GB
+                    return jsonify({'success': False, 'message': f'Disk space tidak cukup! Tersisa: {free_space_gb:.2f} GB'}), 500
+            except Exception as disk_err:
+                logging.warning(f"Could not check disk space: {disk_err}")
+
+            # Cek permission folder uploads
+            if not os.access(uploads_dir, os.W_OK):
+                logging.error(f"No write permission to {uploads_dir}")
+                return jsonify({'success': False, 'message': 'Server tidak memiliki permission untuk menulis ke folder uploads'}), 500
+
             original_name = get_file_name_from_google_drive_url(file_url)
             logging.info(f"Detected filename: {original_name}")
 
@@ -866,18 +887,42 @@ def upload_video():
 
             # Gunakan gdown dengan error handling lebih baik
             try:
+                # Log gdown version untuk debugging
+                logging.info(f"gdown version: {gdown.__version__ if hasattr(gdown, '__version__') else 'unknown'}")
+
                 output_path = gdown.download(url=file_url, output=file_path, quiet=False, fuzzy=True)
+
                 if output_path is None:
-                    raise Exception("gdown returned None - download mungkin gagal atau file tidak dapat diakses")
+                    # Cek apakah file mungkin sudah terdownload sebagian
+                    if os.path.exists(file_path):
+                        partial_size = os.path.getsize(file_path)
+                        logging.error(f"gdown returned None but file exists with size: {partial_size}")
+                        os.remove(file_path)
+                    raise Exception("gdown returned None - file mungkin tidak dapat diakses atau memerlukan permission")
+
             except Exception as gdown_error:
-                logging.error(f"gdown error: {str(gdown_error)}")
+                error_msg = str(gdown_error)
+                logging.error(f"gdown error: {error_msg}")
+                logging.error(f"gdown traceback: {traceback.format_exc()}")
+
                 # Hapus file partial jika ada
                 if os.path.exists(file_path):
-                    os.remove(file_path)
-                return jsonify({'success': False, 'message': f'Gagal download dari Google Drive: {str(gdown_error)}'}), 500
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+
+                # Berikan pesan error yang lebih informatif
+                if "permission" in error_msg.lower() or "access" in error_msg.lower():
+                    return jsonify({'success': False, 'message': 'File Google Drive tidak dapat diakses. Pastikan file di-share sebagai "Anyone with the link"'}), 500
+                elif "quota" in error_msg.lower():
+                    return jsonify({'success': False, 'message': 'Google Drive quota exceeded. Coba lagi nanti atau gunakan link berbeda'}), 500
+                else:
+                    return jsonify({'success': False, 'message': f'Gagal download: {error_msg}'}), 500
 
             # Verifikasi file berhasil didownload
             if not os.path.exists(file_path):
+                logging.error(f"File not found after download: {file_path}")
                 return jsonify({'success': False, 'message': 'File tidak berhasil didownload'}), 500
 
             file_size = os.path.getsize(file_path)
