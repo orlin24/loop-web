@@ -421,10 +421,27 @@ def get_settings():
 
 @loopbot_bp.route('/loopbot/settings', methods=['POST'])
 def update_settings():
+    """Update settings dengan hot-reload - langsung berlaku tanpa restart"""
     try:
         data = request.json
-        loop_bot.settings.update(data)
-        return jsonify({'success': True})
+        # Gunakan method hot-reload yang baru
+        if hasattr(loop_bot, 'update_settings_live'):
+            loop_bot.update_settings_live(data)
+        else:
+            loop_bot.settings.update(data)
+        return jsonify({'success': True, 'message': 'Settings updated (hot-reload active)'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
+@loopbot_bp.route('/loopbot/reload-content', methods=['POST'])
+def reload_content():
+    """Force reload content dari disk"""
+    try:
+        if hasattr(loop_bot, 'reload_content_from_disk'):
+            loop_bot.reload_content_from_disk()
+        else:
+            loop_bot.load_content()
+        return jsonify({'success': True, 'message': 'Content reloaded from disk'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 400
 
@@ -439,7 +456,7 @@ def get_content():
 
 @loopbot_bp.route('/loopbot/content', methods=['POST'])
 def add_content():
-    """Add new content item"""
+    """Add new content item - hot-reload, langsung tersedia untuk streaming"""
     try:
         data = request.json
         if not data.get('title') or not data.get('keystream'):
@@ -455,7 +472,15 @@ def add_content():
         }
         loop_bot.content_items.append(content_item)
         loop_bot.save_content()
-        return jsonify({'success': True, 'message': 'Content added'})
+
+        # Hitung content yang tersedia
+        available = sum(1 for item in loop_bot.content_items if not item.get('used', False))
+        return jsonify({
+            'success': True,
+            'message': f'Content added (hot-reload active). {available} content tersedia.',
+            'total': len(loop_bot.content_items),
+            'available': available
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 400
 
@@ -537,7 +562,7 @@ def import_content():
 
 @loopbot_bp.route('/loopbot/content/<int:index>', methods=['PUT'])
 def update_content(index):
-    """Update existing content item"""
+    """Update existing content item - hot-reload aktif"""
     try:
         if index < 0 or index >= len(loop_bot.content_items):
             return jsonify({'success': False, 'message': 'Invalid index'}), 404
@@ -546,6 +571,7 @@ def update_content(index):
         if not data.get('title') or not data.get('keystream'):
             return jsonify({'success': False, 'message': 'Title and Stream Key are required'}), 400
 
+        old_title = loop_bot.content_items[index].get('title', '')
         loop_bot.content_items[index].update({
             'title': data.get('title', ''),
             'desc': data.get('desc', ''),
@@ -554,20 +580,32 @@ def update_content(index):
             'tags': data.get('tags', '')
         })
         loop_bot.save_content()
-        return jsonify({'success': True, 'message': 'Content updated'})
+
+        return jsonify({
+            'success': True,
+            'message': f'Content "{old_title[:20]}..." updated (hot-reload active)'
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 400
 
 @loopbot_bp.route('/loopbot/content/<int:index>', methods=['DELETE'])
 def delete_content(index):
-    """Delete content item"""
+    """Delete content item - hot-reload aktif"""
     try:
         if index < 0 or index >= len(loop_bot.content_items):
             return jsonify({'success': False, 'message': 'Invalid index'}), 404
 
+        deleted_title = loop_bot.content_items[index].get('title', 'Unknown')
         loop_bot.content_items.pop(index)
         loop_bot.save_content()
-        return jsonify({'success': True, 'message': 'Content deleted'})
+
+        available = sum(1 for item in loop_bot.content_items if not item.get('used', False))
+        return jsonify({
+            'success': True,
+            'message': f'Content "{deleted_title[:20]}..." deleted. {available} content tersisa.',
+            'total': len(loop_bot.content_items),
+            'available': available
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 400
 

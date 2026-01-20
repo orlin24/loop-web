@@ -130,6 +130,13 @@
                             <dt class="col-sm-4">Bitrate</dt>
                             <dd class="col-sm-8">${bitrateText}</dd>
 
+                            <dt class="col-sm-4">Mode</dt>
+                            <dd class="col-sm-8">
+                                <span class="badge ${data.quality_mode === 'enhance' ? 'bg-warning text-dark' : 'bg-secondary'}">
+                                    ${data.quality_mode === 'enhance' ? '⚡ Enhance (Re-encode)' : '📋 Copy (No Re-encode)'}
+                                </span>
+                            </dd>
+
                             <dt class="col-sm-4">Stop Otomatis</dt>
                             <dd class="col-sm-8">${durationText}</dd>
 

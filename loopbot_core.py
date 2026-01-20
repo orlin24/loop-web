@@ -185,9 +185,44 @@ class LoopBotCore:
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
             os.replace(temp_path, content_path)  # Atomic rename
-            self.log_message(f"Saved {len(self.content_items)} content items for channel {self.channel_id}")
+
+            # Count available content for hot-reload info
+            available = sum(1 for item in self.content_items if not item.get('used', False))
+            self.log_message(f"📝 Content updated: {len(self.content_items)} total, {available} available (hot-reload active)")
         except Exception as e:
             self.log_message(f"Error saving content: {str(e)}")
+
+    def update_settings_live(self, new_settings):
+        """Update settings dengan hot-reload - langsung berlaku tanpa restart"""
+        try:
+            old_settings = self.settings.copy()
+            self.settings.update(new_settings)
+
+            # Log perubahan yang signifikan
+            changes = []
+            for key in new_settings:
+                if old_settings.get(key) != new_settings.get(key):
+                    changes.append(f"{key}: {old_settings.get(key)} → {new_settings.get(key)}")
+
+            if changes:
+                self.log_message(f"⚙️ Settings updated (hot-reload): {', '.join(changes)}")
+
+            return True
+        except Exception as e:
+            self.log_message(f"Error updating settings: {str(e)}")
+            return False
+
+    def reload_content_from_disk(self):
+        """Force reload content dari disk - berguna jika file diubah manual"""
+        try:
+            old_count = len(self.content_items)
+            self.load_content()
+            new_count = len(self.content_items)
+            self.log_message(f"🔄 Content reloaded from disk: {old_count} → {new_count} items")
+            return True
+        except Exception as e:
+            self.log_message(f"Error reloading content: {str(e)}")
+            return False
 
     def get_token_path(self):
         return os.path.join(self.base_dir, 'token.pickle')

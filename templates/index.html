@@ -88,20 +88,43 @@
                         </div>
                     </div>
 
+                    <!-- Quality Mode -->
+                    <div class="col-12">
+                        <div class="form-group">
+                            <label for="quality_mode" class="form-label text-light">
+                                <i class="bi bi-sliders me-2"></i>Mode Kualitas
+                            </label>
+                            <select
+                                class="form-select bg-dark border-dark text-light"
+                                id="quality_mode"
+                                name="quality_mode"
+                            >
+                                <option value="copy" selected>Copy (Default) - Tanpa re-encoding, hemat CPU</option>
+                                <option value="enhance">Enhance - Re-encode untuk meningkatkan bitrate</option>
+                            </select>
+                            <small class="text-secondary mt-1">
+                                Pilih <strong>Enhance</strong> jika video sumber memiliki bitrate rendah dan YouTube menunjukkan "koneksi buruk"
+                            </small>
+                        </div>
+                    </div>
+
                     <!-- Bitrate -->
                     <div class="col-12">
                         <div class="form-group">
                             <label for="bitrate" class="form-label text-light">
-                                <i class="bi bi-speedometer2 me-2"></i>Bitrate (opsional)
+                                <i class="bi bi-speedometer2 me-2"></i>Bitrate (kbps)
                             </label>
-                            <input 
-                                type="number" 
-                                class="form-control bg-dark border-dark text-light" 
-                                id="bitrate" 
+                            <input
+                                type="number"
+                                class="form-control bg-dark border-dark text-light"
+                                id="bitrate"
                                 name="bitrate"
                                 placeholder="Masukkan bitrate (dalam kbps)"
+                                value="2500"
                             >
-                            <small class="text-secondary mt-1">Biarkan kosong untuk menggunakan default</small>
+                            <small class="text-secondary mt-1">
+                                Rekomendasi: 720p = 2500-4000, 1080p = 4500-6000. <strong>Hanya berlaku untuk mode Enhance</strong>
+                            </small>
                         </div>
                     </div>
 

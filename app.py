@@ -286,12 +286,13 @@ def run_ffmpeg_with_nice(live_id, info):
         stream_key = info['streamKey']
         bitrate = info.get('bitrate', '2500k')  # Default bitrate lebih rendah
         duration = int(info.get('duration', 0))
-        
+        quality_mode = info.get('quality_mode', 'copy')  # 'copy' atau 'enhance'
+
         # Hitung buffer size berdasarkan bitrate
         bitrate_value = int(bitrate.replace('k', ''))
         bufsize = f"{bitrate_value * 2}k"
         maxrate = bitrate
-        
+
         # Gunakan nice untuk mengurangi prioritas proses di Linux
         if platform.system() == 'Linux':
             if cpulimit_available:
@@ -305,17 +306,54 @@ def run_ffmpeg_with_nice(live_id, info):
         else:
             # Windows tidak mendukung nice atau cpulimit
             base_command = [FFMPEG_PATH]
-        
-        # Bangun perintah FFmpeg
-        ffmpeg_args = [
-            "-loglevel", "warning",
-            "-thread_queue_size", "16384",
-            "-stream_loop", "-1", "-re", "-i", file_path,
-            "-b:v", bitrate, "-bufsize", bufsize, "-maxrate", maxrate,
-            "-f", "flv", "-c:v", "copy", "-c:a", "copy",
-            "-flvflags", "no_duration_filesize",
-            f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
-        ]
+
+        # Bangun perintah FFmpeg berdasarkan quality_mode
+        if quality_mode == 'enhance':
+            # Re-encode mode: untuk meningkatkan bitrate video berkualitas rendah
+            # Gunakan libx264 dengan preset yang cepat dan bitrate target
+            logging.info(f"Using ENHANCE mode with bitrate {bitrate} for {live_id}")
+
+            # Cek apakah ada GPU NVIDIA untuk hardware encoding
+            if has_nvidia_gpu:
+                ffmpeg_args = [
+                    "-loglevel", "warning",
+                    "-thread_queue_size", "16384",
+                    "-stream_loop", "-1", "-re", "-i", file_path,
+                    "-c:v", "h264_nvenc",  # NVIDIA hardware encoder
+                    "-preset", "p4",  # Balance antara speed dan quality
+                    "-b:v", bitrate, "-bufsize", bufsize, "-maxrate", maxrate,
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-f", "flv",
+                    "-flvflags", "no_duration_filesize",
+                    f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
+                ]
+            else:
+                ffmpeg_args = [
+                    "-loglevel", "warning",
+                    "-thread_queue_size", "16384",
+                    "-stream_loop", "-1", "-re", "-i", file_path,
+                    "-c:v", "libx264",  # Software encoder
+                    "-preset", "veryfast",  # Fast encoding untuk streaming
+                    "-tune", "zerolatency",  # Optimasi untuk streaming
+                    "-b:v", bitrate, "-bufsize", bufsize, "-maxrate", maxrate,
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-f", "flv",
+                    "-flvflags", "no_duration_filesize",
+                    f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
+                ]
+        else:
+            # Copy mode (default): stream copy tanpa re-encoding
+            # Catatan: -b:v, -bufsize, -maxrate tidak berpengaruh pada copy mode
+            logging.info(f"Using COPY mode for {live_id}")
+            ffmpeg_args = [
+                "-loglevel", "warning",
+                "-thread_queue_size", "16384",
+                "-stream_loop", "-1", "-re", "-i", file_path,
+                "-c:v", "copy", "-c:a", "copy",
+                "-f", "flv",
+                "-flvflags", "no_duration_filesize",
+                f"rtmp://a.rtmp.youtube.com/live2/{stream_key}"
+            ]
         
         # Gabungkan base_command dan ffmpeg_args
         command = base_command + ffmpeg_args
@@ -534,40 +572,54 @@ def monitor_stream_health():
 
 def monitor_resource_usage():
     last_warning_time = 0
-    WARNING_COOLDOWN = 300  # 5 menit cooldown antara warning
+    WARNING_COOLDOWN = 600  # 10 menit cooldown antara warning (lebih lama)
 
     while not shutdown_event.is_set():
         try:
-            # Cek setiap 30 detik, bisa interrupted oleh shutdown
-            if shutdown_event.wait(30):
+            # Cek setiap 60 detik (lebih jarang untuk hemat resource)
+            if shutdown_event.wait(60):
                 break
 
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = psutil.cpu_percent(interval=0.5)
             memory = psutil.virtual_memory()
+            memory_available_gb = memory.available / (1024**3)
             memory_percent = memory.percent
 
             current_time = time.time()
 
-            # Peringatan jika resource usage tinggi (dengan cooldown)
-            if (cpu_percent > 85 or memory_percent > 85) and (current_time - last_warning_time > WARNING_COOLDOWN):
-                message = f"⚠️ Peringatan: Penggunaan resource tinggi - CPU: {cpu_percent}%, Memory: {memory_percent}%"
+            # Warning berdasarkan AVAILABLE memory (bukan persentase)
+            # Ini lebih akurat karena Linux menggunakan memory untuk cache
+            # Available < 300MB = warning, Available < 150MB = critical
+            is_memory_critical = memory_available_gb < 0.15  # < 150MB
+            is_memory_warning = memory_available_gb < 0.3    # < 300MB
+            is_cpu_critical = cpu_percent > 90
+
+            if (is_memory_warning or is_cpu_critical) and (current_time - last_warning_time > WARNING_COOLDOWN):
+                message = f"⚠️ Resource: CPU {cpu_percent}%, Memory available {memory_available_gb:.2f}GB ({memory_percent}% used)"
                 logging.warning(message)
                 send_telegram_notification(message)
                 last_warning_time = current_time
 
-                # Jika memory sangat tinggi (>92%), hentikan stream prioritas terendah
-                if memory_percent > 92:
-                    active_streams = [(id, info) for id, info in list(live_info.items())
-                                     if info['status'] == 'Active']
+            # Auto-stop stream hanya jika SANGAT kritis (< 150MB available)
+            if is_memory_critical:
+                active_streams = [(id, info) for id, info in list(live_info.items())
+                                 if info['status'] == 'Active']
 
-                    if active_streams:
-                        sorted_streams = sorted(active_streams,
-                                              key=lambda x: x[1].get('priority', 0) or x[1].get('restart_count', 0))
+                if active_streams:
+                    # Prioritaskan stop stream dengan enhance mode (lebih berat)
+                    sorted_streams = sorted(active_streams,
+                                          key=lambda x: (
+                                              0 if x[1].get('quality_mode') == 'enhance' else 1,
+                                              x[1].get('priority', 5),
+                                              x[1].get('restart_count', 0)
+                                          ))
 
-                        if sorted_streams:
-                            low_priority_id = sorted_streams[0][0]
-                            stop_stream_manually(low_priority_id, force=True)
-                            send_telegram_notification(f"🛑 Memory hampir penuh ({memory_percent}%). Stream '{live_info[low_priority_id]['title']}' dihentikan otomatis.")
+                    if sorted_streams:
+                        low_priority_id = sorted_streams[0][0]
+                        stream_title = live_info[low_priority_id]['title']
+                        stop_stream_manually(low_priority_id, force=True)
+                        send_telegram_notification(f"🛑 CRITICAL: Memory < 150MB. Stream '{stream_title}' dihentikan.")
+                        logging.critical(f"Auto-stopped stream {low_priority_id} due to critical memory")
         except Exception as e:
             logging.error(f"Error in resource monitoring: {str(e)}")
 
@@ -607,6 +659,7 @@ def start_stream():
         bitrate = data.get('bitrate')
         duration = data.get('duration')
         priority = data.get('priority', '5')  # Default priority 5 (medium)
+        quality_mode = data.get('quality_mode', 'copy')  # 'copy' atau 'enhance'
 
         if not all([title, video_filename, stream_key]):
             return jsonify({'message': 'Missing parameters'}), 400
@@ -617,18 +670,35 @@ def start_stream():
 
         # Cek jumlah stream aktif
         active_streams = sum(1 for info in live_info.values() if info['status'] == 'Active')
-        
-        # Periksa resource saat ini
-        cpu_percent = psutil.cpu_percent(interval=1)
-        memory_percent = psutil.virtual_memory().percent
-        
-        # Peringatan jika sudah banyak stream aktif atau resource tinggi
+
+        # Periksa resource saat ini (interval=0.1 untuk respon lebih cepat)
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        memory_percent = memory.percent
+        memory_available_gb = memory.available / (1024**3)
+
+        # Threshold yang lebih realistis untuk VPS
+        # - Memory warning hanya jika < 500MB available (bukan persentase)
+        # - CPU warning hanya jika > 85%
+        # - Stream warning hanya jika enhance mode dan > 2 streams
         warning_message = None
-        if active_streams >= 3:
-            warning_message = f"⚠️ Peringatan: Sudah ada {active_streams} stream aktif. Menambahkan stream baru mungkin akan mempengaruhi performa."
-        elif cpu_percent > 80 or memory_percent > 80:
-            warning_message = f"⚠️ Peringatan: Resource sistem tinggi (CPU: {cpu_percent}%, Memory: {memory_percent}%). Menambahkan stream baru mungkin akan mempengaruhi performa."
-        
+
+        # Warning berdasarkan available memory (lebih akurat dari persentase)
+        if memory_available_gb < 0.5:  # Kurang dari 500MB available
+            warning_message = f"⚠️ Memory tersisa rendah ({memory_available_gb:.2f} GB). Pertimbangkan untuk menghentikan stream lain."
+        elif cpu_percent > 85:
+            warning_message = f"⚠️ CPU usage tinggi ({cpu_percent}%). Stream mungkin terpengaruh."
+
+        # Warning khusus untuk enhance mode
+        if quality_mode == 'enhance':
+            if not has_nvidia_gpu and active_streams >= 2:
+                enhance_warning = f"⚠️ Mode Enhance + {active_streams} stream aktif tanpa GPU. CPU load akan tinggi."
+                if warning_message:
+                    warning_message += "\n" + enhance_warning
+                else:
+                    warning_message = enhance_warning
+
+        # Hanya kirim notifikasi jika ada warning yang serius
         if warning_message:
             send_telegram_notification(warning_message)
 
@@ -642,6 +712,7 @@ def start_stream():
             'bitrate': f'{bitrate}k' if bitrate else '2500k',  # Default 2500k
             'duration': int(duration) if duration else 0,
             'priority': int(priority),
+            'quality_mode': quality_mode,  # 'copy' atau 'enhance'
             'restart_count': 0,
             'restart_timestamps': []
         }
@@ -776,10 +847,14 @@ def live_info_page(id):
 def get_live_info(id):
     if id not in live_info:
         return jsonify({'message': 'Live info not found!'}), 404
-    
+
     info = live_info[id]
     info['id'] = id
     info['video_name'] = info['video'].split('_', 1)[-1]
+
+    # Default quality_mode untuk backward compatibility
+    if 'quality_mode' not in info:
+        info['quality_mode'] = 'copy'
     
     # Tambahkan informasi uptime jika ada
     if 'start_time' in info and info['status'] == 'Active':

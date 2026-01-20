@@ -242,7 +242,16 @@
         showAlert(response.message, "danger");
       }
     } else {
-      showAlert(`Error: ${xhr.statusText}`, "danger");
+      let errorMessage = `Error: ${xhr.statusText}`;
+      try {
+        const response = JSON.parse(xhr.responseText);
+        if (response.message) {
+          errorMessage = response.message;
+        }
+      } catch (e) {
+        // If response is not JSON, keep default error message
+      }
+      showAlert(errorMessage, "danger");
     }
 
     setTimeout(resetProgressBar, 2000);
