@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 import atexit
 import fcntl
 import weakref
+import traceback
 
 # Matikan log HTTP bawaan Flask
 log = logging.getLogger('werkzeug')
@@ -850,13 +851,42 @@ def live_list():
 def upload_video():
     if request.method == 'POST':
         try:
-            file_url = request.json['file_url']
+            file_url = request.json.get('file_url')
+            if not file_url:
+                return jsonify({'success': False, 'message': 'URL tidak boleh kosong'}), 400
+
+            logging.info(f"Starting download from: {file_url}")
             original_name = get_file_name_from_google_drive_url(file_url)
+            logging.info(f"Detected filename: {original_name}")
+
             unique_filename = f"{uuid.uuid4()}_{original_name}"
             file_path = os.path.join(uploads_dir, unique_filename)
-            gdown.download(url=file_url, output=file_path, quiet=False, fuzzy=True)
+
+            logging.info(f"Downloading to: {file_path}")
+
+            # Gunakan gdown dengan error handling lebih baik
+            try:
+                output_path = gdown.download(url=file_url, output=file_path, quiet=False, fuzzy=True)
+                if output_path is None:
+                    raise Exception("gdown returned None - download mungkin gagal atau file tidak dapat diakses")
+            except Exception as gdown_error:
+                logging.error(f"gdown error: {str(gdown_error)}")
+                # Hapus file partial jika ada
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return jsonify({'success': False, 'message': f'Gagal download dari Google Drive: {str(gdown_error)}'}), 500
+
+            # Verifikasi file berhasil didownload
+            if not os.path.exists(file_path):
+                return jsonify({'success': False, 'message': 'File tidak berhasil didownload'}), 500
 
             file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                os.remove(file_path)
+                return jsonify({'success': False, 'message': 'File kosong - download gagal'}), 500
+
+            logging.info(f"Download complete: {file_path} ({format_size(file_size)})")
+
             uploaded_videos.append({
                 'filename': unique_filename,
                 'original_name': original_name,
@@ -871,7 +901,7 @@ def upload_video():
                 'filename': unique_filename
             })
         except Exception as e:
-            logging.error(f"Error: {str(e)}")
+            logging.error(f"Error uploading video: {traceback.format_exc()}")
             return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
     return render_template('upload_video.html', title='Upload Video', videos=uploaded_videos)
 

@@ -262,8 +262,10 @@ class LoopBotCore:
 
         self.is_running = True
         self.is_streaming = True
+        self.shutdown_event.clear()  # Reset shutdown event
         threading.Thread(target=self._automation_loop, daemon=True).start()
         threading.Thread(target=self._stats_monitor_loop, daemon=True).start()
+        threading.Thread(target=self._duration_monitor_loop, daemon=True).start()  # Thread khusus untuk auto-stop
         self.log_message("LoopBot automation started")
 
     def stop_loop(self):
@@ -300,6 +302,35 @@ class LoopBotCore:
                 self.log_message(f"Stats monitor error: {e}")
                 if self.shutdown_event.wait(60):
                     break
+
+    def _duration_monitor_loop(self):
+        """Background thread khusus untuk monitoring durasi dan auto-stop stream"""
+        self.log_message("Duration monitor started - will auto-stop streams when duration expires")
+        while self.is_running and not self.shutdown_event.is_set():
+            try:
+                # Cleanup expired streams setiap 10 detik
+                self._cleanup_expired_streams()
+
+                # Log status untuk debugging (setiap 5 menit)
+                if hasattr(self, '_last_duration_log'):
+                    if time.time() - self._last_duration_log > 300:  # 5 menit
+                        active_count = len(self.running_streams)
+                        if active_count > 0:
+                            self.log_message(f"Duration monitor: {active_count} active streams")
+                        self._last_duration_log = time.time()
+                else:
+                    self._last_duration_log = time.time()
+
+                # Check setiap 10 detik
+                if self.shutdown_event.wait(10):
+                    break
+
+            except Exception as e:
+                self.log_message(f"Duration monitor error: {e}")
+                if self.shutdown_event.wait(30):
+                    break
+
+        self.log_message("Duration monitor stopped")
 
     def get_live_broadcast_stats(self, broadcast_id):
         """Get live broadcast statistics (viewers) from YouTube API"""
@@ -470,9 +501,16 @@ class LoopBotCore:
             start_time = stream.get('start_time', current_time)
             duration = stream.get('duration_seconds', 300)
             elapsed = current_time - start_time
+            remaining = duration - elapsed
+
+            # Log warning ketika stream hampir habis (5 menit sebelum)
+            if 0 < remaining <= 300 and not stream.get('_warned_expiring'):
+                stream['_warned_expiring'] = True
+                self.log_message(f"Stream '{stream.get('title', 'Unknown')[:30]}' akan berhenti dalam {int(remaining/60)}m {int(remaining%60)}s")
 
             if elapsed >= duration:
                 expired_streams.append(stream)
+                self.log_message(f"Stream '{stream.get('title', 'Unknown')[:30]}' telah mencapai durasi {duration//60}m {duration%60}s - menghentikan...")
 
         for stream in expired_streams:
             stream_id = stream.get('id')
