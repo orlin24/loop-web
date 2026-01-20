@@ -116,6 +116,11 @@ deactivate
 # ========================================
 echo -e "${GREEN}[5/7] Setting permissions...${NC}"
 timedatectl set-timezone Asia/Jakarta
+
+# Create .cache directory for gdown (Google Drive downloads)
+mkdir -p /var/www/.cache
+chown -R www-data:www-data /var/www/.cache
+
 chown -R www-data:www-data /var/www/html/loop-web
 chmod -R 755 /var/www/html/loop-web
 chmod 700 /var/www/html/loop-web/LoopBot
@@ -180,6 +185,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/html/loop-web
 Environment="PATH=/var/www/html/loop-web/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=/var/www"
 ExecStart=/var/www/html/loop-web/venv/bin/python app.py
 Restart=always
 RestartSec=10
