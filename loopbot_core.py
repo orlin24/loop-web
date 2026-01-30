@@ -584,23 +584,41 @@ class LoopBotCore:
                         view_count = int(stats.get('viewCount', 0))
                         
                         min_views = int(self.settings.get('min_vod_views', 0))
-                        
-                        if min_views > 0:
-                            if view_count < min_views:
-                                self.log_message(f"Views {view_count} < {min_views}. Setting to PRIVATE.")
-                                with self.api_lock:
-                                    self.youtube_service.videos().update(
-                                        part="status",
-                                        body={
-                                            "id": broadcast_id,
-                                            "status": {
-                                                "privacyStatus": "private"
-                                            }
+
+                        # Determine target privacy status
+                        should_be_public = (min_views == 0) or (view_count >= min_views)
+
+                        if should_be_public:
+                            # Set to PUBLIC
+                            self.log_message(f"Views {view_count} >= {min_views}. Setting to PUBLIC.")
+                            with self.api_lock:
+                                self.youtube_service.videos().update(
+                                    part="status",
+                                    body={
+                                        "id": broadcast_id,
+                                        "status": {
+                                            "privacyStatus": "public"
                                         }
-                                    ).execute()
-                                privacy_status = "🔒 <b>PRIVATE</b> (Low Views)"
+                                    }
+                                ).execute()
+                            if min_views == 0:
+                                privacy_status = "🌍 <b>PUBLIC</b> (Auto-Private Disabled)"
                             else:
                                 privacy_status = "🌍 <b>PUBLIC</b> (Target Reached)"
+                        else:
+                            # Set to PRIVATE (views < min_views)
+                            self.log_message(f"Views {view_count} < {min_views}. Setting to PRIVATE.")
+                            with self.api_lock:
+                                self.youtube_service.videos().update(
+                                    part="status",
+                                    body={
+                                        "id": broadcast_id,
+                                        "status": {
+                                            "privacyStatus": "private"
+                                        }
+                                    }
+                                ).execute()
+                            privacy_status = "🔒 <b>PRIVATE</b> (Low Views)"
                                 
                 except Exception as e:
                     self.log_message(f"Error checking views/privacy: {e}")
