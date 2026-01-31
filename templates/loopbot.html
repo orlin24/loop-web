@@ -906,6 +906,7 @@
             delay_minutes: document.getElementById('delayMinutes').value,
             max_streams: document.getElementById('maxStreams').value,
             max_duplicates: document.getElementById('maxDuplicates').value,
+            min_vod_views: parseInt(document.getElementById('minVodViews').value) || 0,
             filter_low_viewers: document.getElementById('filterLowViewers').checked,
             auto_rotate_title: document.getElementById('autoRotateTitle').checked,
             randomize_content: document.getElementById('randomizeContent').checked,
@@ -1379,6 +1380,9 @@
                     if (s.delay_minutes !== undefined) document.getElementById('delayMinutes').value = s.delay_minutes;
                     if (s.max_streams !== undefined) document.getElementById('maxStreams').value = s.max_streams;
                     if (s.max_duplicates !== undefined) document.getElementById('maxDuplicates').value = s.max_duplicates;
+
+                    // Min Vod Views
+                    if (s.min_vod_views !== undefined) document.getElementById('minVodViews').value = s.min_vod_views;
 
                     // Checkboxes
                     if (s.filter_low_viewers !== undefined) document.getElementById('filterLowViewers').checked = s.filter_low_viewers;
