@@ -93,6 +93,7 @@ class LoopBotCore:
         self.content_items = []
 
         self.load_data()
+        self.load_settings()  # Load saved settings from disk
         self.load_content()
         self.load_credentials()
 
@@ -128,6 +129,33 @@ class LoopBotCore:
             self.log_message(f"Loaded: {len(self.titles)} titles, {len(self.descriptions)} descriptions, {len(self.streamkeys)} keys, {len(self.thumbnails)} thumbnails")
         except Exception as e:
             self.log_message(f"Error loading data: {str(e)}")
+
+    def get_settings_path(self):
+        """Get settings file path - global for all channels"""
+        return os.path.join(self.base_dir, 'loopbot_settings.json')
+
+    def save_settings(self):
+        """Save settings to JSON file"""
+        try:
+            settings_path = self.get_settings_path()
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, indent=2)
+            self.log_message(f"💾 Settings saved to disk")
+        except Exception as e:
+            self.log_message(f"Error saving settings: {str(e)}")
+
+    def load_settings(self):
+        """Load settings from JSON file, merge with defaults"""
+        try:
+            settings_path = self.get_settings_path()
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    saved_settings = json.load(f)
+                # Merge saved settings with defaults (saved takes priority)
+                self.settings.update(saved_settings)
+                self.log_message(f"⚙️ Settings loaded from disk")
+        except Exception as e:
+            self.log_message(f"Error loading settings: {str(e)}")
 
     def get_content_path(self):
         """Get content file path - per channel if logged in, otherwise global"""
@@ -206,6 +234,8 @@ class LoopBotCore:
 
             if changes:
                 self.log_message(f"⚙️ Settings updated (hot-reload): {', '.join(changes)}")
+                # Save to disk so settings persist after restart
+                self.save_settings()
 
             return True
         except Exception as e:
